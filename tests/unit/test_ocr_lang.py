@@ -13,6 +13,18 @@ import src.app.ocr as ocr_module
 from src.app.ocr import paddle_lang_to_iso639_3, run_paddle_ocr
 
 
+@pytest.fixture(autouse=True)
+def _pin_local_routing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the engine routing to local regardless of the developer's
+    .env: a set OCR_SERVICE_URL would make these tests POST to the GPU
+    box and fail with connection errors that look like product bugs."""
+    monkeypatch.setattr(
+        ocr_module,
+        "get_settings",
+        lambda: SimpleNamespace(ocr_service_url=None, ocr_device=None),
+    )
+
+
 class _FakePaddleOCR:
     """Stub engine recording constructor kwargs, returning a fixed result."""
 
