@@ -15,30 +15,35 @@ Unset `OCR_SERVICE_URL` means local inference. Nothing else changes.
 ## Requirements on the GPU box
 
 1. **A checkout of this repository.** The service imports `src.app.ocr`; pip installs alone are not enough.
-2. **Python 3.11+** with the project dependencies (`uv sync --extra dev` works).
-3. **The CUDA-matched Paddle wheel.** The repo pins the CPU wheel. On the GPU box, replace it:
+2. **Python 3.11+**.
+3. **The CUDA-matched Paddle wheel, installed sync-free.** The repo pins the CPU wheel (`paddlepaddle`), and `uv.lock` reinstalls it on every `uv run` or `uv sync`. Build the environment once, then never let uv touch it again:
 
    ```bash
-   uv pip uninstall paddlepaddle
+   uv venv
+   uv pip install -e ".[dev]"          # fastapi, uvicorn, python-multipart included
+   uv pip uninstall paddlepaddle       # CPU wheel out
    uv pip install "paddlepaddle-gpu>=3.3,<4" \
-       -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
+       -i https://www.paddlepaddle.org.cn/packages/stable/cu126/   # GPU wheel in, LAST
    ```
 
    Pick the index URL that matches the box's CUDA version (see the installation matrix at paddlepaddle.org). An NVIDIA driver new enough for that CUDA version must be installed.
-4. `fastapi`, `uvicorn` and `python-multipart` (part of the dev extras).
+
+   **Do not run `uv run` or `uv sync` in this checkout after the swap.** Either would re-sync from `uv.lock`, reinstall the CPU wheel, and the service would silently run on CPU. If you need `uv run`, pass `--no-sync` and launch the interpreter directly as shown below.
 
 Verify the CUDA build before starting:
 
 ```bash
-python -c "import paddle; print(paddle.is_compiled_with_cuda()); paddle.utils.run_check()"
+.venv/bin/python -c "import paddle; print(paddle.is_compiled_with_cuda()); paddle.utils.run_check()"
 ```
 
-The first line must print `True`; `run_check()` must not raise.
+The first line must print `True`; `run_check()` must not raise. If it prints `False`, uv re-synced the CPU wheel — repeat the swap.
 
 ## Run the service
 
+Launch the interpreter directly, never through `uv run` (it re-syncs the lock and undoes the GPU wheel swap):
+
 ```bash
-uv run python scripts/ocr_service.py --host 0.0.0.0 --port 8080 --device gpu:0
+.venv/bin/python scripts/ocr_service.py --host 0.0.0.0 --port 8080 --device gpu:0
 ```
 
 Flags:
@@ -98,7 +103,7 @@ The win is `GPU speedup − network cost`: the whole image ships per job, so a s
 
 | Symptom | Cause and fix |
 |---|---|
-| `CUDA build=False` in the log | CPU wheel installed. Replace it with `paddlepaddle-gpu` (see Requirements). |
+| `CUDA build=False` in the log | The CPU wheel is back — usually a `uv run`/`uv sync` after the swap re-synced it from `uv.lock`. Redo the swap (see Requirements) and launch with `.venv/bin/python`, not `uv run`. |
 | `CUDA build=True` but slow | `--device` unset and auto-selection picked CPU, or the GPU is busy. Pin with `--device gpu:0` and check `nvidia-smi`. |
 | Connection errors from the UI | Service down, wrong port, or a firewall. `curl http://gpu-box:8080/version` from the XmLLM machine. |
 | HTTP 413 | Upload above `--max-upload-mb`. |
