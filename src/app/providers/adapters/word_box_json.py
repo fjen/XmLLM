@@ -104,6 +104,11 @@ class WordBoxJsonAdapter(BaseAdapter):
             bbox = (max(0.0, bbox[0]), max(0.0, bbox[1]), bbox[2], bbox[3])
             polygon = [(max(0.0, x), max(0.0, y)) for x, y in polygon]
 
+            # Degenerate boxes: a perfectly horizontal or vertical detection
+            # polygon measures zero in one dimension (real OCR data). The
+            # smallest honest box occupies one pixel in that dimension.
+            bbox = (bbox[0], bbox[1], max(bbox[2], 1.0), max(bbox[3], 1.0))
+
             # Per-line word boxes ([l, t, r, b] → [x, y, w, h]) get the same
             # resize + clamp treatment as the line itself. Lines without word
             # data take the line-level fallback (see build loop).
@@ -117,6 +122,8 @@ class WordBoxJsonAdapter(BaseAdapter):
                         factor = 1.0 / geometry_context.resize_factor
                         wb = (wb[0] * factor, wb[1] * factor, wb[2] * factor, wb[3] * factor)
                     wb = (max(0.0, wb[0]), max(0.0, wb[1]), wb[2], wb[3])
+                    # Same degenerate-dimension clamp as the line box.
+                    wb = (wb[0], wb[1], max(wb[2], 1.0), max(wb[3], 1.0))
                     line_words.append({"text": wtext.strip(), "bbox": wb})
 
             word_bboxes.append(bbox)

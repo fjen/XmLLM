@@ -440,6 +440,49 @@ class TestWordLevelPayload:
         with pytest.raises(ValueError, match="no items"):
             adapter.normalize(raw, geo_ctx, document_id="d")
 
+    def test_degenerate_line_bbox_clamped(
+        self, adapter: WordBoxJsonAdapter, geo_ctx: GeometryContext
+    ) -> None:
+        """A perfectly horizontal detection polygon measures h=0; the
+        smallest honest box occupies one pixel row."""
+        payload = [
+            [[[10, 30], [110, 30], [110, 30], [10, 30]], ("Flat", 0.9)],
+        ]
+        raw = RawProviderPayload(
+            provider_id="paddleocr",
+            adapter_id="adapter.word_box_json.v1",
+            runtime_type="local",
+            payload=payload,
+            image_width=200,
+            image_height=120,
+        )
+        doc = adapter.normalize(raw, geo_ctx, document_id="d")
+        line = doc.pages[0].text_regions[0].lines[0]
+        x, y, w, h = line.geometry.bbox
+        assert (x, y, w, h) == (10.0, 30.0, 100.0, 1.0)
+
+    def test_degenerate_word_bbox_clamped(
+        self, adapter: WordBoxJsonAdapter, geo_ctx: GeometryContext
+    ) -> None:
+        payload = [
+            [
+                [[10, 10], [110, 10], [110, 40], [10, 40]],
+                ("Two words", 0.9, [["Two", (10, 25, 55, 25)], ["words", (60, 10, 110, 40)]]),
+            ]
+        ]
+        raw = RawProviderPayload(
+            provider_id="paddleocr",
+            adapter_id="adapter.word_box_json.v1",
+            runtime_type="local",
+            payload=payload,
+            image_width=200,
+            image_height=120,
+        )
+        doc = adapter.normalize(raw, geo_ctx, document_id="d")
+        word = doc.pages[0].text_regions[0].lines[0].words[0]
+        x, y, w, h = word.geometry.bbox
+        assert (x, y, w, h) == (10.0, 25.0, 45.0, 1.0)
+
     def test_ambiguous_line_falls_back_and_warns(
         self, adapter: WordBoxJsonAdapter, geo_ctx: GeometryContext
     ) -> None:

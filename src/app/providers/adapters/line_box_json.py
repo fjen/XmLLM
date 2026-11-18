@@ -99,6 +99,10 @@ class LineBoxJsonAdapter(BaseAdapter):
             else:
                 bbox = xyxy_to_xywh(tuple(float(v) for v in raw_bbox))
 
+            # Degenerate boxes: a zero width or height is not representable
+            # in the canonical model; one pixel is the smallest honest box.
+            bbox = (bbox[0], bbox[1], max(bbox[2], 1.0), max(bbox[3], 1.0))
+
             confidence = item.get("confidence")
             if confidence is not None:
                 confidence = max(0.0, min(1.0, float(confidence)))
