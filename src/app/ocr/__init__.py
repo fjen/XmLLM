@@ -54,14 +54,24 @@ def _get_ocr(lang: str) -> Any:
         return instance
     if len(_ocr_instances) >= _OCR_CACHE_LIMIT:
         _ocr_instances.pop(next(iter(_ocr_instances)))
+    import paddle
     from paddleocr import PaddleOCR
-    _ocr_instances[lang] = PaddleOCR(
-        lang=lang,
-        use_textline_orientation=True,
-        use_doc_orientation_classify=False,
-        use_doc_unwarping=False,
-        enable_mkldnn=False,
-        return_word_box=True,
+
+    device = get_settings().ocr_device
+    kwargs: dict[str, Any] = {
+        "lang": lang,
+        "use_textline_orientation": True,
+        "use_doc_orientation_classify": False,
+        "use_doc_unwarping": False,
+        "enable_mkldnn": False,
+        "return_word_box": True,
+    }
+    if device:
+        kwargs["device"] = device
+    _ocr_instances[lang] = PaddleOCR(**kwargs)
+    logger.info(
+        "PaddleOCR[%s]: CUDA build=%s, device=%s",
+        lang, paddle.is_compiled_with_cuda(), device or "auto",
     )
     return _ocr_instances[lang]
 

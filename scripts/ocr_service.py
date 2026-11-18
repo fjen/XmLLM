@@ -42,6 +42,7 @@ servers work too but gain little over local inference.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 import tempfile
@@ -113,7 +114,14 @@ def main() -> int:
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--max-upload-mb", type=int, default=50)
+    parser.add_argument(
+        "--device", default=None,
+        help="Paddle device (e.g. gpu:0). Unset: PaddleOCR auto-selects"
+             " GPU when the paddlepaddle-gpu build supports CUDA.",
+    )
     args = parser.parse_args()
+    if args.device:
+        os.environ["OCR_DEVICE"] = args.device
     global MAX_UPLOAD_BYTES
     MAX_UPLOAD_BYTES = args.max_upload_mb * 1024 * 1024
     import uvicorn

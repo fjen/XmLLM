@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import types
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -21,9 +22,11 @@ class _FakePaddleOCR:
         self, *, lang: str, use_textline_orientation: bool,
         use_doc_orientation_classify: bool, use_doc_unwarping: bool,
         enable_mkldnn: bool, return_word_box: bool,
+        device: str | None = None,
     ) -> None:
         self.lang = lang
         self.return_word_box = return_word_box
+        self.device = device
         _FakePaddleOCR.instances.append(self)
 
     def predict(self, image_path: str) -> list[dict[str, Any]]:
@@ -64,6 +67,31 @@ class TestRunPaddleOcrLang:
         assert results[0][0] == [[1.0, 1.0], [2.0, 1.0], [2.0, 2.0], [1.0, 2.0]]
         assert results[0][1] == ("word", 0.9)
 
+    def test_device_reaches_engine_constructor(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            ocr_module,
+            "get_settings",
+            lambda: SimpleNamespace(ocr_device="gpu:0", ocr_service_url=None),
+        )
+        image = tmp_path / "page.tiff"
+        image.write_bytes(b"fake")
+
+        run_paddle_ocr(image, lang="fr")
+
+        assert _FakePaddleOCR.instances[0].device == "gpu:0"
+
+    def test_device_unset_leaves_auto_select(
+        self, tmp_path: Path
+    ) -> None:
+        image = tmp_path / "page.tiff"
+        image.write_bytes(b"fake")
+
+        run_paddle_ocr(image, lang="fr")
+
+        assert _FakePaddleOCR.instances[0].device is None
+
     def test_excluded_lang_skips_reconstruction(
         self, tmp_path: Path
     ) -> None:
@@ -72,7 +100,6 @@ class TestRunPaddleOcrLang:
         image.write_bytes(b"fake")
 
         results = run_paddle_ocr(image, lang="ch")
-
         text, conf, words, reason = results[0][1]
         assert text == "word"
         assert conf == pytest.approx(0.9)

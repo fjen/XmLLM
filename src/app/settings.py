@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     # PaddleOCR locally. The service returns the same word_box_json
     # payload in the same coordinate space, so nothing downstream changes.
     ocr_service_url: str | None = None
+    # Paddle device passed to PaddleOCR when set (e.g. "gpu:0"). Unset,
+    # PaddleOCR auto-selects: GPU if the paddle build supports CUDA, else
+    # CPU. Note enable_mkldnn is CPU-only (oneDNN) and irrelevant on GPU.
+    ocr_device: str | None = None
 
     # -- Geometry -------------------------------------------------------------
     bbox_containment_tolerance: int = 5
