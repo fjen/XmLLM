@@ -130,7 +130,12 @@ python scripts/batch_alto.py /path/to/book --lang en --out /path/to/alto
   to ISO 639-3 and stamped onto canonical nodes, so ALTO output carries
   `LANG` attributes (e.g. `fr` → `LANG="fra"`)
 - `--out` optionally copies each `alto.xml` as `<image-stem>.xml`
+- images whose ALTO output already exists are **skipped** on rerun (with
+  `--out`: the destination XML exists; without: a prior job for the same
+  filename produced ALTO). Use `--no-skip-existing` to reprocess everything
 - `--storage-root` overrides `STORAGE_ROOT` (default: `./data` or the `.env` value)
+- batch jobs do **not** copy the source image into the job directory (the
+  file already lives on disk); the viewer image route 404s for batch jobs
 - exit code 0 only if every image produced ALTO
 
 ## Remote OCR (GPU offload)

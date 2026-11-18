@@ -117,6 +117,10 @@ def process_image(
         image_width=image_width,
         image_height=image_height,
         image_path=tif,
+        # The source image already lives on disk; copying it into the job
+        # dir doubles disk usage for the whole batch. The viewer image
+        # route 404s for batch jobs, which is fine — batch is offline.
+        save_image=False,
     )
 
     if not result.has_alto:

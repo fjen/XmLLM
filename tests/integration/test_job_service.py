@@ -143,6 +143,76 @@ class TestJobService:
         assert "persist" in steps
         db.close()
 
+    def test_save_image_false_skips_input_copy(
+        self, tmp_storage: Path, fixtures_dir: Path, tmp_path: Path
+    ) -> None:
+        from PIL import Image
+
+        svc, db, store = self._setup(tmp_storage)
+        with open(fixtures_dir / "paddle_ocr_sample.json") as f:
+            payload = json.load(f)
+        raw = RawProviderPayload(
+            provider_id="paddleocr",
+            adapter_id="adapter.word_box_json.v1",
+            runtime_type="local",
+            payload=payload,
+            image_width=2480, image_height=3508,
+        )
+        img = tmp_path / "page.png"
+        Image.new("RGB", (10, 10), "white").save(img)
+
+        job = svc.create_job(
+            provider_id="paddleocr",
+            provider_family="word_box_json",
+            source_filename=img.name,
+        )
+        result = svc.run_job(
+            job, raw, image_width=2480, image_height=3508,
+            image_path=img, save_image=False,
+        )
+
+        assert result.status == JobStatus.SUCCEEDED
+        assert result.has_alto
+        # The source image is not duplicated into the job directory.
+        assert store.get_input_image_path(result.job_id) is None
+        # The RECEIVE_FILE step is recorded as skipped, not silently absent.
+        steps = [(e["step"], e["status"]) for e in store.load_events(result.job_id)]
+        assert ("receive_file", "skipped") in steps
+        db.close()
+
+    def test_default_copies_input_image(
+        self, tmp_storage: Path, fixtures_dir: Path, tmp_path: Path
+    ) -> None:
+        from PIL import Image
+
+        svc, db, store = self._setup(tmp_storage)
+        with open(fixtures_dir / "paddle_ocr_sample.json") as f:
+            payload = json.load(f)
+        raw = RawProviderPayload(
+            provider_id="paddleocr",
+            adapter_id="adapter.word_box_json.v1",
+            runtime_type="local",
+            payload=payload,
+            image_width=2480, image_height=3508,
+        )
+        img = tmp_path / "page.png"
+        Image.new("RGB", (10, 10), "white").save(img)
+
+        job = svc.create_job(
+            provider_id="paddleocr",
+            provider_family="word_box_json",
+            source_filename=img.name,
+        )
+        result = svc.run_job(
+            job, raw, image_width=2480, image_height=3508, image_path=img
+        )
+
+        assert result.status == JobStatus.SUCCEEDED
+        copied = store.get_input_image_path(result.job_id)
+        assert copied is not None
+        assert copied.read_bytes() == img.read_bytes()
+        db.close()
+
     def test_canonical_json_on_disk_is_valid(self, tmp_storage: Path, fixtures_dir: Path) -> None:
         svc, db, store = self._setup(tmp_storage)
 

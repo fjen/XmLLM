@@ -93,11 +93,16 @@ class JobService:
         image_path: Path | None = None,
         policy: DocumentPolicy | None = None,
         enricher_pipeline: EnricherPipeline | None = None,
+        save_image: bool = True,
     ) -> Job:
         """Execute the full pipeline for a job.
 
         In V1, the raw_payload is provided externally (runtime execution
         is not yet integrated). The pipeline runs synchronously.
+
+        save_image=False skips copying the source image into the job
+        directory (batch mode: the source already lives on disk; the
+        viewer's /jobs/{id}/image route then 404s for the job).
         """
         if policy is None:
             policy = DocumentPolicy()
@@ -118,9 +123,14 @@ class JobService:
 
         try:
             # Step 1: receive file
-            with events.step(JobStep.RECEIVE_FILE):
-                if image_path and image_path.exists():
-                    self._store.save_input_image(job.job_id, image_path)
+            if save_image:
+                with events.step(JobStep.RECEIVE_FILE):
+                    if image_path and image_path.exists():
+                        self._store.save_input_image(job.job_id, image_path)
+            else:
+                events.skip(
+                    JobStep.RECEIVE_FILE, "input image copy disabled (batch mode)"
+                )
 
             # Step 5: save raw payload
             with events.step(JobStep.SAVE_RAW):
