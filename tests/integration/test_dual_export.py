@@ -19,6 +19,8 @@ from src.app.serializers.alto_xml import ALTO_NS, serialize_alto
 from src.app.serializers.page_xml import PAGE_NS, serialize_page_xml
 from src.app.validators.export_eligibility_validator import compute_export_eligibility
 
+from tests.helpers import with_word_boxes
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -29,7 +31,7 @@ class TestDualExport:
     def test_both_exports_from_same_document(self, fixtures_dir: Path) -> None:
         # 1. Load and normalize
         with open(fixtures_dir / "paddle_ocr_sample.json") as f:
-            paddle_output = json.load(f)
+            paddle_output = with_word_boxes(json.load(f))
 
         raw = RawProviderPayload(
             provider_id="paddleocr",
@@ -68,12 +70,12 @@ class TestDualExport:
 
         # 5. Validate ALTO structure
         alto_strings = alto_root.findall(f".//{{{ALTO_NS}}}String")
-        assert len(alto_strings) == 5
+        assert len(alto_strings) == 12
         assert alto_strings[0].get("CONTENT") == "Bonjour"
 
         # 6. Validate PAGE structure
         page_words = page_root.findall(f".//{{{PAGE_NS}}}Word")
-        assert len(page_words) == 5
+        assert len(page_words) == 12
         w1_te = page_words[0].find(f".//{{{PAGE_NS}}}Unicode")
         assert w1_te.text == "Bonjour"
 
@@ -90,7 +92,7 @@ class TestDualExport:
     def test_page_has_coords_alto_has_hpos(self, fixtures_dir: Path) -> None:
         """PAGE uses Coords/points, ALTO uses HPOS/VPOS/WIDTH/HEIGHT."""
         with open(fixtures_dir / "paddle_ocr_sample.json") as f:
-            paddle_output = json.load(f)
+            paddle_output = with_word_boxes(json.load(f))
 
         raw = RawProviderPayload(
             provider_id="paddleocr", adapter_id="v1", runtime_type="local",
@@ -125,7 +127,7 @@ class TestDualExport:
 
     def test_page_has_reading_order(self, fixtures_dir: Path) -> None:
         with open(fixtures_dir / "paddle_ocr_sample.json") as f:
-            paddle_output = json.load(f)
+            paddle_output = with_word_boxes(json.load(f))
 
         raw = RawProviderPayload(
             provider_id="paddleocr", adapter_id="v1", runtime_type="local",

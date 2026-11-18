@@ -282,3 +282,64 @@ class TestAltoHyphenation:
         assert s2.get("CONTENT") == "moine"
         assert s2.get("SUBS_TYPE") == "HypPart2"
         assert s2.get("SUBS_CONTENT") == "patrimoine"
+
+
+def _wordless_line_doc() -> CanonicalDocument:
+    """One line with a transcription but no reconstructed words (ADR 0001)."""
+    return CanonicalDocument(
+        document_id="doc_alto_wordless",
+        source=Source(input_type=InputType.IMAGE, filename="test.png"),
+        pages=[
+            Page(
+                id="p1",
+                page_index=0,
+                width=2480,
+                height=3508,
+                alto_readiness=AltoReadiness(level=ReadinessLevel.PARTIAL),
+                page_readiness=PageXmlReadiness(level=ReadinessLevel.PARTIAL),
+                reading_order=["tb1"],
+                text_regions=[
+                    TextRegion(
+                        id="tb1",
+                        role=BlockRole.BODY,
+                        geometry=_geo(100, 200, 1200, 900),
+                        lang="fra",
+                        provenance=_prov(),
+                        lines=[
+                            TextLine(
+                                id="tl1",
+                                geometry=_geo(110, 220, 1100, 42),
+                                lang="fra",
+                                confidence=0.91,
+                                provenance=_prov(),
+                                transcription="Bonjour le monde",
+                                words=[],
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+        ],
+    )
+
+
+class TestCompatibilityString:
+    """Line-level fallback export (ADR 0001) — full text, line box."""
+
+    def test_wordless_line_exports_single_string(self) -> None:
+        root = etree.fromstring(serialize_alto(_wordless_line_doc()))
+        strings = root.findall(f".//{{{ALTO_NS}}}String")
+        assert len(strings) == 1
+        s = strings[0]
+        assert s.get("CONTENT") == "Bonjour le monde"
+        assert s.get("ID") == "tl1_str"
+        assert float(s.get("HPOS")) == 110.0
+        assert float(s.get("VPOS")) == 220.0
+        assert float(s.get("WIDTH")) == 1100.0
+        assert float(s.get("HEIGHT")) == 42.0
+        assert s.get("WC") == "0.91"
+        assert s.get("LANG") == "fra"
+
+    def test_wordless_line_has_no_sp(self) -> None:
+        root = etree.fromstring(serialize_alto(_wordless_line_doc()))
+        assert not root.findall(f".//{{{ALTO_NS}}}SP")
