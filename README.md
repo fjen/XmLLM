@@ -139,6 +139,13 @@ If local CPU inference is too slow, run PaddleOCR on a separate GPU server
 and point XmLLM at it with `OCR_SERVICE_URL`. Setup, version pinning,
 security and benchmarking: [docs/ocr-service.md](docs/ocr-service.md).
 
+One trap that fails silently: `pyproject.toml` pins the CPU wheel
+(`paddlepaddle`), and `uv run` / `uv sync` re-sync from `uv.lock`. On the
+GPU box, install the GPU wheel **after** the project deps and never re-sync
+afterwards — otherwise the next `uv run` quietly puts the CPU wheel back and
+the service runs at CPU speed. The startup log (`CUDA build=...`) and
+`curl /version` catch it. Details in the guide.
+
 ## API reference
 
 All endpoints are documented at `/docs` (Swagger UI) when the server is running.
