@@ -75,6 +75,22 @@ def non_text_to_overlay(ntr: NonTextRegion) -> OverlayItem:
     )
 
 
+def non_text_to_inspection(ntr: NonTextRegion) -> InspectionData:
+    """Build inspection data for a non-text region (kind, no text)."""
+    return InspectionData(
+        id=ntr.id,
+        level=OverlayLevel.NON_TEXT,
+        text=None,
+        bbox=ntr.geometry.bbox,
+        polygon=ntr.geometry.polygon,
+        confidence=ntr.confidence,
+        provenance_type=ntr.provenance.evidence_type,
+        provenance_provider=ntr.provenance.provider,
+        geometry_status=ntr.geometry.status,
+        role=ntr.kind.value,
+    )
+
+
 def word_to_inspection(word: Word) -> InspectionData:
     """Build inspection data for a word."""
     return InspectionData(

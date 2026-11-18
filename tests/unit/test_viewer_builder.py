@@ -154,6 +154,21 @@ class TestProjectionBuilder:
         assert len(vp.block_overlays) == 1
         assert vp.block_overlays[0].id == "tb1"
 
+    def test_non_text_overlay_has_inspection_entry(self) -> None:
+        """Non-text overlays must be clickable: id → inspection_index.
+
+        The integration fixtures never produce non_text_regions (no adapter
+        emits them today), so this unit test is the only coverage for the
+        non-text branch of the click-for-details contract.
+        """
+        doc = _simple_doc()
+        vp = build_projection(doc)
+        assert len(vp.non_text_overlays) == 1
+        entry = vp.inspection_index["ntr1"]
+        assert entry.level == OverlayLevel.NON_TEXT
+        assert entry.role == "illustration"
+        assert entry.bbox == (1500, 200, 400, 300)
+
     def test_line_overlays(self) -> None:
         doc = _simple_doc()
         vp = build_projection(doc)

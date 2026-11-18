@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from src.app.settings import Settings
+
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
 
 
 @pytest.fixture
@@ -31,3 +35,19 @@ def test_settings(tmp_storage: Path) -> Settings:
         db_name="test.db",
         log_level="debug",
     )
+
+
+@pytest.fixture
+def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    """TestClient with lifespan — ensures DB/FileStore/JobService are initialized."""
+    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "data"))
+    from src.app import settings as settings_mod
+    monkeypatch.setattr(
+        settings_mod,
+        "get_settings",
+        lambda: settings_mod.Settings(storage_root=tmp_path / "data"),
+    )
+    from fastapi.testclient import TestClient
+    from src.app.main import app
+    with TestClient(app) as c:
+        yield c

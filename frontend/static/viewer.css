@@ -1,0 +1,298 @@
+/* XmLLM static viewer styles.
+ *
+ * Adapted from LightOnOCR (https://github.com/lighton-ai/LightOnOCR), Apache-2.0.
+ * The .box/.chip/.blk/pane rules are ported from LightOnOCR's
+ * lightonocr/static/app.css (viewer section) and restyled for XmLLM's
+ * Xerox-Star theme — everything uses the CSS custom properties defined in
+ * frontend/static/index.html. The viewer itself adds no external loads
+ * (index.html's own font @import predates the viewer).
+ */
+
+/* ── Viewer container ───────────────────────────────── */
+
+.viewer-area { margin-top: 12px; }
+
+.viewer-loading {
+  padding: 16px;
+  text-align: center;
+  color: var(--disabled);
+  font-size: 11px;
+}
+
+.viewer-nodata {
+  border: 2px solid var(--border);
+  background: #f0f0f0;
+  padding: 12px;
+  font-size: 11px;
+  margin-top: 12px;
+}
+
+.xmllm-viewer { margin-top: 8px; }
+
+/* Fullscreen (Fullscreen API on .xmllm-viewer): fill the viewport and let
+   the panes take the remaining height instead of the fixed clamp. */
+.xmllm-viewer:fullscreen {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 12px;
+  height: 100vh;
+  background: var(--window-bg, #fff);
+  overflow: auto;
+}
+.xmllm-viewer:fullscreen .viewer-panes {
+  flex: 1;
+  min-height: 0;
+}
+.xmllm-viewer:fullscreen .viewer-pane {
+  height: auto;
+}
+
+/* ── Toolbar: level toggles, label chips, badges, zoom ── */
+
+.viewer-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 11px;
+}
+
+.viewer-toolbar .group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  border: 2px solid var(--border);
+  padding: 2px;
+  background: var(--window-bg);
+}
+
+.viewer-toolbar .group button {
+  box-shadow: none;
+  transform: none;
+  border: 0;
+  padding: 2px 8px;
+  font-size: 10px;
+  background: transparent;
+}
+
+.viewer-toolbar .group button:active {
+  box-shadow: none;
+  transform: none;
+}
+
+.viewer-toolbar .group button[aria-pressed="true"] {
+  background: var(--select-bg);
+  color: var(--select-text);
+}
+
+.viewer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--border);
+  background: var(--button-bg);
+  padding: 1px 8px;
+  font-size: 10px;
+  font-weight: bold;
+  cursor: pointer;
+  user-select: none;
+}
+.viewer-chip i {
+  width: 8px;
+  height: 8px;
+  background: var(--c);
+  border: 1px solid var(--border);
+}
+.viewer-chip b { font-weight: normal; color: var(--disabled); }
+.viewer-chip[aria-pressed="false"] { opacity: 0.45; text-decoration: line-through; }
+
+.viewer-badge {
+  display: inline-block;
+  border: 1px solid var(--border);
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: bold;
+  text-transform: uppercase;
+}
+.viewer-badge.full { background: #c6f5c6; }
+.viewer-badge.partial { background: #f5eec6; }
+.viewer-badge.degraded { background: #f5c6c6; }
+.viewer-badge.none { background: #eeeeee; color: var(--disabled); }
+
+.viewer-flags {
+  width: 100%;
+  font-size: 10px;
+  color: var(--error);
+}
+
+/* ── Two panes: image+overlays left, inspection right ── */
+
+.viewer-panes {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  border: 2px solid var(--border);
+  background: var(--window-bg);
+}
+
+.viewer-pane {
+  position: relative;
+  overflow: auto;
+  height: clamp(460px, 74vh, 1100px);
+  min-height: 0;
+}
+.viewer-pane.left { background: #d8d8d8; padding: 12px; }
+.viewer-pane.right { border-left: 2px solid var(--border); }
+
+/* The page is scaled to fit its pane (fitPage in viewer.js) and holds one
+   overlay per block/line/word — a bbox <div>, or an SVG polygon when the
+   projection carries one. --c is the label colour. */
+.viewer-page {
+  position: relative;
+  margin: 0 auto;
+  background: #ffffff;
+  box-shadow: 2px 2px 0 var(--button-shadow);
+}
+.viewer-page img { display: block; width: 100%; height: auto; }
+.viewer-page svg.poly {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none; /* the shapes re-enable it, the empty canvas does not eat clicks */
+}
+.viewer-page svg.poly .poly-shape { pointer-events: auto; cursor: pointer; }
+
+/* Percentage-positioned bbox overlay (port of LightOnOCR's .box). */
+.xbox {
+  position: absolute;
+  border: 1px solid var(--c);
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.xbox.inview,
+.poly-shape.inview {
+  stroke-width: 3;
+  background: var(--c); /* fallback */
+  background: color-mix(in srgb, var(--c) 13%, transparent);
+  fill-opacity: 0.22;
+}
+.xbox.on,
+.poly-shape.on {
+  background: var(--c); /* fallback */
+  background: color-mix(in srgb, var(--c) 24%, transparent);
+  fill-opacity: 0.35;
+  box-shadow: 0 0 0 2px var(--c);
+  z-index: 2;
+}
+.xbox.sel { border-width: 2px; }
+
+/* Hovered boxes show their label (port of .box::before). */
+.xbox::before {
+  content: attr(data-label);
+  position: absolute;
+  left: -1px;
+  bottom: 100%;
+  padding: 0 5px;
+  background: var(--c);
+  color: #ffffff;
+  font: bold 9px/14px "Monaco", "Courier New", monospace;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+}
+.xbox.on::before { opacity: 1; }
+
+/* ── Right pane: details + one card per overlay (port of .blk) ── */
+
+.viewer-details {
+  border-bottom: 2px solid var(--border);
+  background: #f5f5f5;
+  padding: 8px;
+  font-size: 11px;
+}
+.viewer-details.hidden { display: none; }
+.viewer-details .details-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-family: "Monaco", "Courier New", monospace;
+  font-size: 10px;
+  word-break: break-all;
+}
+.viewer-details .details-head button {
+  padding: 0 8px;
+  font-size: 10px;
+  min-width: 22px;
+}
+.viewer-details .details-grid {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 2px 8px;
+}
+.viewer-details .k { font-weight: bold; }
+.viewer-details .v { word-break: break-word; }
+.viewer-details .details-meta {
+  margin: 6px 0 0;
+  border: 1px inset var(--border);
+  background: var(--window-bg);
+  padding: 6px;
+  font: 9px/1.5 "Monaco", "Courier New", monospace;
+  max-height: 120px;
+  overflow: auto;
+  white-space: pre;
+}
+
+.viewer-cards { padding: 10px; }
+
+.viewer-card {
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--c);
+  background: var(--window-bg);
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition: box-shadow 0.12s;
+}
+.viewer-card.on { box-shadow: 2px 2px 0 var(--c); }
+.viewer-card .meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 9px;
+}
+.viewer-card .lab {
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--c);
+}
+.viewer-card .bbox {
+  color: var(--disabled);
+  font: 9px/1.5 "Monaco", "Courier New", monospace;
+}
+.viewer-card .txt {
+  margin-top: 3px;
+  font-size: 11px;
+  word-break: break-word;
+}
+.viewer-card .conf {
+  margin-top: 2px;
+  font-size: 9px;
+  color: var(--disabled);
+}
+
+.viewer-empty { padding: 24px 0; text-align: center; color: var(--disabled); }
+
+/* ── Narrow screens: panes stack ─────────────────────── */
+
+@media (max-width: 640px) {
+  .viewer-panes { grid-template-columns: 1fr; }
+  .viewer-pane.right { border-left: 0; border-top: 2px solid var(--border); }
+}

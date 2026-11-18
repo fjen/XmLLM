@@ -52,6 +52,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def add_nosniff_header(request, call_next):
+    """Never let browsers MIME-sniff responses (uploaded content is
+    user-controlled; a sniffed image polyglot would be stored XSS)."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
 # -- Register routers --------------------------------------------------------
 
 app.include_router(health_router)

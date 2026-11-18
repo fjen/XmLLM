@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>XmLLM — Document Structure Engine</title>
+  <link rel="stylesheet" href="/static/viewer.css">
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Chicago&display=swap');
 
@@ -378,26 +379,29 @@
 
       <div class="result-area hidden" id="result-area">
         <h3>&#9745; Result</h3>
-        <div class="result-row">
-          <span class="result-label">Status</span>
-          <span class="result-value" id="res-status"></span>
-        </div>
-        <div class="result-row">
-          <span class="result-label">Duration</span>
-          <span class="result-value" id="res-duration"></span>
-        </div>
-        <div class="result-row">
-          <span class="result-label">Exports</span>
-          <span class="result-value" id="res-exports"></span>
-        </div>
-        <div class="result-row" id="res-downloads-row">
-          <span class="result-label">Download</span>
-          <span class="result-value" id="res-downloads"></span>
+        <div id="res-summary">
+          <div class="result-row">
+            <span class="result-label">Status</span>
+            <span class="result-value" id="res-status"></span>
+          </div>
+          <div class="result-row">
+            <span class="result-label">Duration</span>
+            <span class="result-value" id="res-duration"></span>
+          </div>
+          <div class="result-row">
+            <span class="result-label">Exports</span>
+            <span class="result-value" id="res-exports"></span>
+          </div>
+          <div class="result-row" id="res-downloads-row">
+            <span class="result-label">Download</span>
+            <span class="result-value" id="res-downloads"></span>
+          </div>
         </div>
         <div class="event-log hidden" id="event-log"></div>
         <div style="margin-top:6px;text-align:right;">
           <button onclick="toggleLog()">Show Log</button>
         </div>
+        <div id="viewer-area" class="viewer-area hidden"></div>
       </div>
 
     </div>
@@ -497,8 +501,16 @@
 
 <script>
 const API = '';
+window.API_BASE = API;  // consumed by viewer.js (loaded after this script)
 
 /* ── Page switching ── */
+// Escape untrusted values (filenames etc.) before any innerHTML use.
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
 function showPage(name) {
   ['scan','jobs','advanced'].forEach(p => {
     document.getElementById('page-' + p).classList.add('hidden');
@@ -587,7 +599,8 @@ function showResult(data) {
     '<span class="status-badge ' + data.status + '">' + data.status.toUpperCase() + '</span>';
 
   document.getElementById('res-duration').textContent =
-    data.duration_ms ? Math.round(data.duration_ms) + ' ms' : '\u2014';
+    (data.ocr_ms ? Math.round(data.ocr_ms) + ' ms OCR \u00b7 ' : '') +
+    (data.duration_ms ? Math.round(data.duration_ms) + ' ms pipeline' : '\u2014');
 
   document.getElementById('res-exports').innerHTML =
     '<span class="tag ' + (data.has_alto ? 'ok' : 'no') + '">ALTO ' + (data.has_alto ? '\u2713' : '\u2717') + '</span> ' +
@@ -609,6 +622,28 @@ function showResult(data) {
       (e.duration_ms ? Math.round(e.duration_ms) + 'ms' : e.message || '')
     ).join('\n');
   }).catch(() => {});
+
+  // Render the visual viewer for completed jobs (augments the result area).
+  document.getElementById('res-summary').classList.remove('hidden');
+  if (data.status === 'succeeded' || data.status === 'partial_success') {
+    openViewer(data.job_id);
+  } else {
+    // Fully tear down any previous viewer (stops its observers, clears DOM).
+    if (window.closeViewer) window.closeViewer();
+    document.getElementById('viewer-area').classList.add('hidden');
+  }
+}
+
+/* Open the inline viewer for a job (job-list "View" affordance). */
+function viewJob(jobId) {
+  showPage('scan');
+  // The summary rows and event log belong to the last submission — hide
+  // them for this job so its viewer isn't paired with someone else's log.
+  document.getElementById('res-summary').classList.add('hidden');
+  document.getElementById('event-log').classList.add('hidden');
+  document.getElementById('event-log').textContent = '';
+  document.getElementById('result-area').classList.remove('hidden');
+  openViewer(jobId);
 }
 
 function toggleLog() {
@@ -630,13 +665,14 @@ async function loadJobs() {
     tbody.innerHTML = jobs.map(j => `<tr>
       <td style="font-family:monospace;font-size:10px;">${j.job_id.slice(-8)}</td>
       <td><span class="status-badge ${j.status}">${j.status}</span></td>
-      <td>${j.source_filename || '\u2014'}</td>
+      <td>${escapeHtml(j.source_filename || '\u2014')}</td>
       <td><span class="tag ${j.has_alto ? 'ok' : 'no'}">${j.has_alto ? '\u2713' : '\u2717'}</span></td>
       <td><span class="tag ${j.has_page_xml ? 'ok' : 'no'}">${j.has_page_xml ? '\u2713' : '\u2717'}</span></td>
       <td>${j.duration_ms ? Math.round(j.duration_ms) + 'ms' : '\u2014'}</td>
       <td>
-        ${j.has_alto ? `<a class="download-btn" href="${API}/jobs/${j.job_id}/alto" style="font-size:10px;">ALTO</a>` : ''}
-        ${j.has_page_xml ? `<a class="download-btn" href="${API}/jobs/${j.job_id}/pagexml" style="font-size:10px;">PAGE</a>` : ''}
+        ${(j.status === 'succeeded' || j.status === 'partial_success') ? `<button class="download-btn" style="font-size:10px;" data-job-id="${escapeHtml(j.job_id)}">&#128065; View</button>` : ''}
+        ${j.has_alto ? `<a class="download-btn" href="${API}/jobs/${encodeURIComponent(j.job_id)}/alto" style="font-size:10px;">ALTO</a>` : ''}
+        ${j.has_page_xml ? `<a class="download-btn" href="${API}/jobs/${encodeURIComponent(j.job_id)}/pagexml" style="font-size:10px;">PAGE</a>` : ''}
       </td>
     </tr>`).join('');
     document.getElementById('jobs-count').textContent = jobs.length + ' document' + (jobs.length > 1 ? 's' : '');
@@ -645,6 +681,15 @@ async function loadJobs() {
       '<tr><td colspan="7" style="color:var(--error);">Failed to load</td></tr>';
   }
 }
+
+// View buttons are rendered as <button data-job-id="…"> (attribute context,
+// where escaping is sufficient) and bound once here by delegation — inline
+// onclick="…" templates would put the id into a JS string context, which
+// HTML-escaping does NOT make safe (entities are decoded before JS parses).
+document.getElementById('jobs-table').addEventListener('click', e => {
+  const btn = e.target.closest('[data-job-id]');
+  if (btn) viewJob(btn.dataset.jobId);
+});
 
 /* ── Advanced (raw payload) ── */
 async function runAdvanced() {
@@ -678,5 +723,6 @@ async function runAdvanced() {
   }
 }
 </script>
+<script src="/static/viewer.js"></script>
 </body>
 </html>

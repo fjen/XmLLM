@@ -14,6 +14,7 @@ from src.app.domain.models.viewer_projection import InspectionData, OverlayItem,
 from src.app.viewer.overlays import (
     line_to_inspection,
     line_to_overlay,
+    non_text_to_inspection,
     non_text_to_overlay,
     region_to_inspection,
     region_to_overlay,
@@ -70,6 +71,7 @@ def build_projection(
 
     for ntr in page.non_text_regions:
         non_text_overlays.append(non_text_to_overlay(ntr))
+        inspection_index[ntr.id] = non_text_to_inspection(ntr)
 
     image_ref = ""
     if doc.source.filename:
