@@ -21,16 +21,27 @@ _OCR_CACHE_LIMIT = 8
 def _get_ocr(lang: str) -> Any:
     """Lazy-load PaddleOCR 3.x, one instance per language.
 
-    Coordinate contract: rec_polys are in the ORIGINAL image's pixel space —
-    the same space the viewer's `/jobs/{id}/image` serves. To keep that
-    guarantee, the coordinate-altering preprocessors are disabled:
+    Coordinate contract: rec_polys and word fragment boxes are treated as
+    coordinates in the image passed to PaddleOCR; the adapter maps both
+    into the pixel space of the image served by `/jobs/{id}/image` (via
+    the pipeline's `resize_factor`). To keep that mapping exact, the
+    coordinate-altering preprocessors are disabled:
     `use_doc_unwarping=False` (UVDoc would return polys in dewarped space)
     and `use_doc_orientation_classify=False` (a rotated/upside-down upload
     would otherwise return polys in rotated space while the viewer still
-    draws the unrotated bytes — silently wrong overlays). Rotated input
-    must be corrected before upload; OCR quality on uncorrected rotated
-    input degrades, which is honest and visible. Both flags also skip two
-    model loads per instance.
+    draws the unrotated bytes — silently wrong overlays). Disabling these
+    does not by itself make the OCR input identical to the presented image
+    if the adapter resized or cropped the input — the resize_factor
+    mapping accounts for exactly those transforms. Rotated input must be
+    corrected before upload; OCR quality on uncorrected rotated input
+    degrades, which is honest and visible. Both flags also skip two model
+    loads per instance.
+
+    Scope of the guarantee: this only removes Paddle's own orientation/
+    unwarping transforms. The contract is verified by overlaying both
+    line polygons and word boxes on the exact image used for ALTO
+    presentation (ink-overlap check in the e2e run and the browser
+    viewer).
 
     `enable_mkldnn=False` works around a paddle 3.3 oneDNN/PIR bug
     (ConvertPirAttribute2RuntimeAttribute) that crashes PP-OCRv6 inference.
@@ -59,24 +70,36 @@ def merge_paddle_words(
 ) -> list[tuple[str, tuple[float, float, float, float]]] | None:
     """Reconstruct whitespace-delimited words from PaddleOCR fragments.
 
-    With ``return_word_box=True`` PaddleOCR emits one box per recognition
-    column, which splits linguistic words ('Universitätsbibliothek' →
+    With ``return_word_box=True``, PaddleOCR can return positioned text
+    fragments whose boundaries do not necessarily match printed word
+    boundaries ('Universitätsbibliothek' may arrive as
     'Universit'|'ä'|'tsbibliothek'). The line transcription is the
     reference: fragments are matched to character spans in it, in order,
     so repeated fragments bind to the right occurrence; word boundaries
     come from the transcription's whitespace, never from geometric gaps.
 
+    Matching rules: leading and trailing whitespace is trimmed from each
+    fragment before matching (a fragment ``" ä "`` maps to ``ä``, it does
+    not force spaces into ``Universitätsbibliothek``); internal whitespace
+    is preserved and makes the fragment span multiple tokens (a fragment
+    ``"Die Universität"`` covers two tokens → fallback). Invariant: every
+    non-whitespace character in the reference line must be covered exactly
+    once by the ordered fragment matches, and every matched fragment must
+    contribute to at most one token's box. If either condition fails, the
+    caller retains the line transcription and polygon, reports the reason,
+    and emits no canonical words.
+
     Returns one (word_text, (left, top, right, bottom)) per whitespace-
-    delimited token, the box being the union of its member fragment boxes,
-    or None when the mapping is ambiguous:
+    delimited token. The word's text is the transcription slice itself and
+    its box is the smallest axis-aligned rectangle enclosing the member
+    fragment boxes — or None when the mapping is ambiguous:
 
     - a fragment's text does not occur at the expected position in the
       transcription (recognition drift, reordering, dropped characters),
     - a fragment with non-whitespace content spans more than one word (its
       box cannot be subdivided into measured per-word boxes),
-    - the fragments do not cover the whole transcription.
-
-    Whitespace-only fragments belong to no word (no ink) and are skipped.
+    - the fragments leave non-whitespace transcription text uncovered
+      (before the first fragment, between fragments, or as suffix).
     On None the caller must keep the line-level data and flag the line —
     no estimated word boundaries or coordinates. Line-end hyphenation
     ('Kran-') stays its own token; fragments are never merged across
@@ -86,23 +109,29 @@ def merge_paddle_words(
     if not word_spans:
         return None
 
-    # Sequential exact matching: each fragment must occur at or after the
-    # previous fragment's end, so repeated fragments map to the correct
-    # occurrence and any drift or reordering fails loudly.
+    # Sequential matching with a forward cursor: each fragment must occur at
+    # or after the previous fragment's end, so repeated fragments map to the
+    # correct occurrence. Only transcription whitespace may be skipped
+    # between matches — reaching a fragment across non-whitespace text means
+    # the mapping is broken (e.g. ["aaa"] must not bind to the second "aaa"
+    # of "aaa aaa" and quietly leave the first one uncovered).
     frag_spans: list[tuple[int, int, list[Any]]] = []
     cursor = 0
     for text, box in fragments:
-        if not text:
-            continue
-        start = line_text.find(text, cursor)
+        frag = text.strip()
+        if not frag:
+            continue  # whitespace-only fragment: no ink, belongs to no word
+        start = line_text.find(frag, cursor)
         if start < 0:
             return None
-        end = start + len(text)
+        if line_text[cursor:start].strip():
+            return None  # match skips non-whitespace transcription text
+        end = start + len(frag)
         cursor = end
         frag_spans.append((start, end, box))
 
     if line_text[cursor:].strip():
-        return None  # fragments leave non-whitespace text uncovered
+        return None  # fragments leave non-whitespace transcription text
 
     # A fragment shared by two words cannot yield measured per-word boxes.
     # A fragment covering only whitespace belongs to no word (it has no
@@ -145,6 +174,7 @@ def run_paddle_ocr(image_path: Path, lang: str) -> list[Any]:
     """
     ocr = _get_ocr(lang)
     results = ocr.predict(str(image_path))
+    iso3 = paddle_lang_to_iso639_3(lang)
     payload: list[Any] = []
     for res in results:
         polys = res["rec_polys"]
@@ -163,6 +193,20 @@ def run_paddle_ocr(image_path: Path, lang: str) -> list[Any]:
         ):
             points = [[float(x), float(y)] for x, y in poly]
             line_text = str(text)
+            if iso3 in WORD_RECONSTRUCTION_DISABLED_LANGS:
+                # Exclusion policy (ADR 0001): no reconstruction, the line
+                # keeps its transcription, the page is flagged.
+                payload.append([
+                    points,
+                    (
+                        line_text,
+                        float(score),
+                        None,
+                        f"word reconstruction disabled for language "
+                        f"'{iso3}' (exclusion policy, ADR 0001)",
+                    ),
+                ])
+                continue
             if have_words:
                 fragments = [
                     (str(tok), box)
@@ -208,6 +252,15 @@ _PADDLE_LANG_TO_ISO3 = {
 
 
 _ISO3_CODES = frozenset(_PADDLE_LANG_TO_ISO3.values())
+
+# Exclusion policy (ADR 0001): caller-declared languages for which
+# whitespace-based word reconstruction is disabled — a deliberate
+# conservative choice, not a claim about the scripts (Korean normally
+# uses spaces between written units). Whitespace splitting would merge
+# such a line into one line-sized token without ever triggering the
+# ambiguity checks. The decision applies to the whole line as declared,
+# including mixed-script lines.
+WORD_RECONSTRUCTION_DISABLED_LANGS = frozenset({"zho", "jpn", "kor", "tha"})
 
 # Allowlist of language codes accepted by POST /ocr and scripts/batch_alto.py.
 # Bounds the code space before it reaches the engine or the instance cache.

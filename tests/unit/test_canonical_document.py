@@ -264,6 +264,8 @@ class TestTextLine:
         assert line.text == "Bonjour"
 
     def test_empty_words_rejected(self) -> None:
+        # Words may be empty only when a transcription is present
+        # (line-level fallback, ADR 0001).
         with pytest.raises(ValidationError):
             TextLine(
                 id="tl1",
@@ -271,6 +273,27 @@ class TestTextLine:
                 provenance=_prov(),
                 words=[],
             )
+
+    def test_empty_words_with_transcription_allowed(self) -> None:
+        line = TextLine(
+            id="tl1",
+            geometry=_geo(),
+            provenance=_prov(),
+            transcription="Bonjour",
+            words=[],
+        )
+        assert line.words == []
+        assert line.text == "Bonjour"
+
+    def test_transcription_takes_precedence_over_word_join(self) -> None:
+        line = TextLine(
+            id="tl1",
+            geometry=_geo(),
+            provenance=_prov(),
+            transcription="Bonjour  le",  # exact spacing preserved
+            words=[_word("w1", "Bonjour"), _word("w2", "le")],
+        )
+        assert line.text == "Bonjour  le"
 
     def test_multiple_words(self) -> None:
         line = _line(words=[_word("w1", "Hello"), _word("w2", "world")])

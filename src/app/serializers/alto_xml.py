@@ -171,10 +171,34 @@ def _add_text_line(
     tl.set("ID", line.id)
     _set_bbox_attrs(tl, line.geometry.bbox, rounding)
 
+    if not line.words:
+        # Compatibility fallback (ADR 0001): the line carries no
+        # reconstructed words, so its transcription is exported as a single
+        # <String> with the line box. Full text survives, but this does NOT
+        # meet the DFG Viewer's word-coordinate requirement — the geometry
+        # is line-level, not word-level.
+        if line.text:
+            _add_compatibility_string(tl, line, rounding)
+        return
+
     for i, word in enumerate(line.words):
         if i > 0:
             _add_sp(tl)
         _add_string(tl, word, rounding)
+
+
+def _add_compatibility_string(
+    parent: etree._Element, line: TextLine, rounding: RoundingStrategy
+) -> None:
+    """Add a single <String> holding a word-less line's transcription."""
+    s = etree.SubElement(parent, f"{{{ALTO_NS}}}String")
+    s.set("ID", f"{line.id}_str")
+    _set_bbox_attrs(s, line.geometry.bbox, rounding)
+    s.set("CONTENT", line.text)
+    if line.confidence is not None:
+        s.set("WC", f"{line.confidence:.2f}")
+    if line.lang:
+        s.set("LANG", line.lang)
 
 
 def _add_string(

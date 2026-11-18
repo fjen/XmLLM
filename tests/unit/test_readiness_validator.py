@@ -18,6 +18,12 @@ from src.app.domain.models import (
     Word,
 )
 from src.app.domain.models.status import InputType, MissingCapability
+from src.app.normalization.canonical_builder import CanonicalBuilder
+from src.app.policies.export_policy import check_alto_export
+from src.app.serializers.alto_xml import serialize_alto
+from src.app.validators.export_eligibility_validator import (
+    compute_export_eligibility,
+)
 from src.app.validators.readiness_validator import (
     compute_document_readiness,
     compute_page_alto_readiness,
@@ -67,7 +73,9 @@ class TestAltoReadiness:
         assert r.level == ReadinessLevel.FULL
         assert r.missing == []
 
-    def test_missing_word_geometry_is_none(self) -> None:
+    def test_missing_word_geometry_is_partial(self) -> None:
+        """Word-level capabilities degrade to PARTIAL, not NONE (ADR 0001):
+        the compatibility <String> still yields valid ALTO with full text."""
         page = Page(
             id="p1", page_index=0, width=2480, height=3508,
             text_regions=[
@@ -85,8 +93,93 @@ class TestAltoReadiness:
             ],
         )
         r = compute_page_alto_readiness(page)
-        assert r.level == ReadinessLevel.NONE
+        assert r.level == ReadinessLevel.PARTIAL
         assert MissingCapability.WORD_GEOMETRY in r.missing
+
+    def test_wordless_lines_degrade_to_partial(self) -> None:
+        """A page whose lines carry only transcriptions is PARTIAL with
+        WORD_TEXT/WORD_GEOMETRY missing — exportable, not word-complete."""
+        page = Page(
+            id="p1", page_index=0, width=2480, height=3508,
+            text_regions=[
+                TextRegion(
+                    id="tb1", geometry=_geo(), provenance=_prov(),
+                    lines=[TextLine(
+                        id="tl1", geometry=_geo(), provenance=_prov(),
+                        transcription="Hello",
+                        words=[],
+                    )],
+                ),
+            ],
+        )
+        r = compute_page_alto_readiness(page)
+        assert r.level == ReadinessLevel.PARTIAL
+        assert MissingCapability.WORD_TEXT in r.missing
+        assert MissingCapability.WORD_GEOMETRY in r.missing
+
+    def test_blank_line_does_not_degrade_readiness(self) -> None:
+        """A whitespace-only transcription carries nothing to locate and
+        must not downgrade an otherwise word-complete page."""
+        page = Page(
+            id="p1", page_index=0, width=2480, height=3508,
+            reading_order=["tb1"],
+            text_regions=[
+                TextRegion(
+                    id="tb1", geometry=_geo(), provenance=_prov(),
+                    lines=[
+                        TextLine(
+                            id="tl1", geometry=_geo(), provenance=_prov(),
+                            words=[Word(
+                                id="w1", text="Hello",
+                                geometry=_geo(), provenance=_prov(),
+                                confidence=0.9,
+                            )],
+                        ),
+                        TextLine(
+                            id="tl2", geometry=_geo(), provenance=_prov(),
+                            transcription="   ",
+                            words=[],
+                        ),
+                    ],
+                ),
+            ],
+        )
+        r = compute_page_alto_readiness(page)
+        assert r.level == ReadinessLevel.FULL
+        assert r.missing == []
+
+    def test_fallback_page_exports_with_zero_canonical_words(self) -> None:
+        """A fallback line survives ALTO export as a compatibility <String>
+        while carrying zero canonical words — export must not make a
+        PARTIAL page appear word-ready (ADR 0001)."""
+        builder = CanonicalBuilder("doc1", InputType.IMAGE)
+        page = builder.add_page("p1", 0, 2480, 3508)
+        region = page.add_text_region("tb1", _geo(), _prov())
+        region.add_line(
+            "tl1", _geo(), _prov(), transcription="Hello world"
+        )
+        doc = builder.build()
+
+        line = doc.pages[0].text_regions[0].lines[0]
+        assert line.words == []  # zero canonical words
+
+        # Readiness: word-level capabilities missing, page PARTIAL
+        r = compute_page_alto_readiness(doc.pages[0])
+        assert r.level == ReadinessLevel.PARTIAL
+        assert MissingCapability.WORD_TEXT in r.missing
+        assert MissingCapability.WORD_GEOMETRY in r.missing
+
+        # Export: allowed under the default policy, via the compatibility
+        # <String> — but the exported ALTO must not claim word-level data.
+        decision = check_alto_export(compute_export_eligibility(doc))
+        assert decision.allowed
+
+        root = etree.fromstring(serialize_alto(doc))
+        ns = "{http://www.loc.gov/standards/alto/ns-v4#}"
+        strings = root.findall(f".//{ns}String")
+        assert len(strings) == 1
+        assert strings[0].get("CONTENT") == "Hello world"
+        assert strings[0].get("ID") == "tl1_str"  # compatibility, not w*
 
     def test_missing_confidence_is_partial(self) -> None:
         page = Page(

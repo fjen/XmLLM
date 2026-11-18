@@ -27,6 +27,7 @@ from src.app.serializers.page_xml import PAGE_NS, serialize_page_xml
 from src.app.validators.export_eligibility_validator import compute_export_eligibility
 from src.app.validators.structural_validator import validate_structure
 from src.app.viewer.projection_builder import build_projection
+from tests.helpers import with_word_boxes
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -48,6 +49,9 @@ def _run_paddle_pipeline(fixture_name: str, fixtures_dir: Path) -> tuple[
     """Full pipeline for a PaddleOCR-format fixture."""
     with open(fixtures_dir / fixture_name) as f:
         payload = json.load(f)
+    # Synthetic word boxes so the word-level code paths are exercised
+    # (line-level-only payloads take the ADR 0001 fallback instead).
+    payload = with_word_boxes(payload)
 
     raw = RawProviderPayload(
         provider_id="paddleocr", adapter_id="v1", runtime_type="local",

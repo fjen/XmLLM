@@ -85,30 +85,35 @@ class TestWordBoxJsonAdapter:
     ) -> None:
         doc = adapter.normalize(raw, geo_ctx, document_id="test_doc")
         page = doc.pages[0]
-        # 5 items in fixture → 5 lines, each with 1 word
+        # Fixture items carry no word data → line-level fallback: no words,
+        # the transcription lives on the line (ADR 0001).
         total_words = sum(
             len(line.words)
             for region in page.text_regions
             for line in region.lines
         )
-        assert total_words == 5
+        assert total_words == 0
+        lines = [
+            ln for region in page.text_regions for ln in region.lines
+        ]
+        assert [ln.text for ln in lines] == [
+            "Bonjour", "le", "monde",
+            "Ceci est une seconde ligne", "Troisième ligne de texte",
+        ]
 
-    def test_word_text_preserved(
+    def test_transcription_preserved(
         self,
         adapter: WordBoxJsonAdapter,
         raw: RawProviderPayload,
         geo_ctx: GeometryContext,
     ) -> None:
         doc = adapter.normalize(raw, geo_ctx, document_id="test_doc")
-        words = [
-            w.text
-            for r in doc.pages[0].text_regions
-            for ln in r.lines
-            for w in ln.words
+        lines = [
+            ln for r in doc.pages[0].text_regions for ln in r.lines
         ]
-        assert words[0] == "Bonjour"
-        assert words[1] == "le"
-        assert words[2] == "monde"
+        assert lines[0].transcription == "Bonjour"
+        assert lines[1].transcription == "le"
+        assert lines[2].transcription == "monde"
 
     def test_confidence_preserved(
         self,
@@ -117,8 +122,8 @@ class TestWordBoxJsonAdapter:
         geo_ctx: GeometryContext,
     ) -> None:
         doc = adapter.normalize(raw, geo_ctx, document_id="test_doc")
-        first_word = doc.pages[0].text_regions[0].lines[0].words[0]
-        assert first_word.confidence == pytest.approx(0.96)
+        first_line = doc.pages[0].text_regions[0].lines[0]
+        assert first_line.confidence == pytest.approx(0.96)
 
     def test_geometry_is_exact(
         self,
@@ -127,8 +132,8 @@ class TestWordBoxJsonAdapter:
         geo_ctx: GeometryContext,
     ) -> None:
         doc = adapter.normalize(raw, geo_ctx, document_id="test_doc")
-        first_word = doc.pages[0].text_regions[0].lines[0].words[0]
-        assert first_word.geometry.status == GeometryStatus.EXACT
+        first_line = doc.pages[0].text_regions[0].lines[0]
+        assert first_line.geometry.status == GeometryStatus.EXACT
 
     def test_polygon_preserved(
         self,
@@ -137,9 +142,9 @@ class TestWordBoxJsonAdapter:
         geo_ctx: GeometryContext,
     ) -> None:
         doc = adapter.normalize(raw, geo_ctx, document_id="test_doc")
-        first_word = doc.pages[0].text_regions[0].lines[0].words[0]
-        assert first_word.geometry.polygon is not None
-        assert len(first_word.geometry.polygon) == 4
+        first_line = doc.pages[0].text_regions[0].lines[0]
+        assert first_line.geometry.polygon is not None
+        assert len(first_line.geometry.polygon) == 4
 
     def test_bbox_correct(
         self,
@@ -148,10 +153,10 @@ class TestWordBoxJsonAdapter:
         geo_ctx: GeometryContext,
     ) -> None:
         doc = adapter.normalize(raw, geo_ctx, document_id="test_doc")
-        first_word = doc.pages[0].text_regions[0].lines[0].words[0]
+        first_line = doc.pages[0].text_regions[0].lines[0]
         # From fixture: [[100,200],[300,200],[300,240],[100,240]]
         # → bbox = (100, 200, 200, 40)
-        x, y, w, h = first_word.geometry.bbox
+        x, y, w, h = first_line.geometry.bbox
         assert x == pytest.approx(100)
         assert y == pytest.approx(200)
         assert w == pytest.approx(200)
@@ -164,10 +169,10 @@ class TestWordBoxJsonAdapter:
         geo_ctx: GeometryContext,
     ) -> None:
         doc = adapter.normalize(raw, geo_ctx, document_id="test_doc")
-        first_word = doc.pages[0].text_regions[0].lines[0].words[0]
-        assert first_word.provenance.evidence_type == EvidenceType.PROVIDER_NATIVE
-        assert first_word.provenance.provider == "paddleocr"
-        assert "$[0]" in first_word.provenance.source_ref
+        first_line = doc.pages[0].text_regions[0].lines[0]
+        assert first_line.provenance.evidence_type == EvidenceType.PROVIDER_NATIVE
+        assert first_line.provenance.provider == "paddleocr"
+        assert "$[0]" in first_line.provenance.source_ref
 
     def test_block_is_inferred(
         self,
@@ -330,8 +335,10 @@ class TestWordLevelPayload:
         doc = adapter.normalize(self._raw(), geo_ctx, document_id="d")
         lines = doc.pages[0].text_regions[0].lines
         assert [w.text for w in lines[0].words] == ["Hello", "world"]
-        # Fallback line keeps a single word with the full line text
-        assert [w.text for w in lines[1].words] == ["Second"]
+        # Line without word data → line-level fallback: no words, the
+        # transcription lives on the line (ADR 0001)
+        assert lines[1].words == []
+        assert lines[1].transcription == "Second"
 
     def test_word_boxes_converted_to_xywh(
         self, adapter: WordBoxJsonAdapter, geo_ctx: GeometryContext
@@ -348,9 +355,6 @@ class TestWordLevelPayload:
         word = doc.pages[0].text_regions[0].lines[0].words[0]
         assert word.provenance.evidence_type is EvidenceType.DERIVED
         assert word.provenance.source_ref == "$[0].text_word"
-        # Fallback word keeps the line's native evidence
-        fallback = doc.pages[0].text_regions[0].lines[1].words[0]
-        assert fallback.provenance.evidence_type is EvidenceType.PROVIDER_NATIVE
 
     def test_word_ids_are_unique(
         self, adapter: WordBoxJsonAdapter, geo_ctx: GeometryContext
@@ -362,7 +366,7 @@ class TestWordLevelPayload:
             for ln in r.lines
             for w in ln.words
         ]
-        assert ids == ["w1_1", "w1_2", "w2"]
+        assert ids == ["w1_1", "w1_2"]
 
     def test_malformed_word_entry_raises(
         self, adapter: WordBoxJsonAdapter, geo_ctx: GeometryContext
@@ -403,8 +407,10 @@ class TestWordLevelPayload:
             image_height=120,
         )
         doc = adapter.normalize(raw, geo_ctx, document_id="d")
-        words = doc.pages[0].text_regions[0].lines[0].words
-        assert [w.text for w in words] == ["a b"]
+        line = doc.pages[0].text_regions[0].lines[0]
+        # Line-level fallback: no word geometry, transcription retained
+        assert line.words == []
+        assert line.transcription == "a b"
         assert doc.pages[0].warnings == [
             "1 of 1 lines: word fragments do not align"
         ]

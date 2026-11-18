@@ -65,10 +65,12 @@ class TestPaddleToAlto:
         ]
         assert len(all_words) == 5
 
-        # Verify provenance chain
+        # Verify provenance chain. Reconstructed words carry bbox-only
+        # geometry (the enclosing rectangle of their fragments); the
+        # polygon stays on the line.
         for word in all_words:
             assert word.provenance.provider == "paddleocr"
-            assert word.geometry.polygon is not None
+            assert word.geometry.polygon is None
 
         # 3. Serialize to ALTO XML
         alto_bytes = serialize_alto(doc)

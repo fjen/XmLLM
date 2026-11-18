@@ -70,8 +70,20 @@ class TestCanonicalBuilder:
         page = builder.add_page("p1", 0, 100, 100)
         region = page.add_text_region("tb1", _geo(), _prov())
         region.add_line("tl1", _geo(), _prov())
-        with pytest.raises(ValueError, match="no words"):
+        with pytest.raises(ValueError, match="neither words nor a transcription"):
             builder.build()
+
+    def test_line_with_transcription_only_is_valid(self) -> None:
+        builder = CanonicalBuilder("doc1", InputType.IMAGE)
+        page = builder.add_page("p1", 0, 100, 100)
+        region = page.add_text_region("tb1", _geo(), _prov())
+        region.add_line(
+            "tl1", _geo(), _prov(), transcription="line text"
+        )
+        doc = builder.build()
+        line = doc.pages[0].text_regions[0].lines[0]
+        assert line.words == []
+        assert line.text == "line text"
 
     def test_multiple_words_per_line(self) -> None:
         builder = CanonicalBuilder("doc1", InputType.IMAGE)

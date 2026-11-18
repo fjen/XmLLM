@@ -64,6 +64,32 @@ class TestRunPaddleOcrLang:
         assert results[0][0] == [[1.0, 1.0], [2.0, 1.0], [2.0, 2.0], [1.0, 2.0]]
         assert results[0][1] == ("word", 0.9)
 
+    def test_excluded_lang_skips_reconstruction(
+        self, tmp_path: Path
+    ) -> None:
+        """Excluded languages keep the line-level transcription, flagged."""
+        image = tmp_path / "page.tiff"
+        image.write_bytes(b"fake")
+
+        results = run_paddle_ocr(image, lang="ch")
+
+        text, conf, words, reason = results[0][1]
+        assert text == "word"
+        assert conf == pytest.approx(0.9)
+        assert words is None
+        assert "zho" in reason
+        assert "disabled" in reason
+
+    def test_whitespace_script_keeps_plain_payload(
+        self, tmp_path: Path
+    ) -> None:
+        """Engines without word data keep the two-element form for latin langs."""
+        image = tmp_path / "page.tiff"
+        image.write_bytes(b"fake")
+
+        results = run_paddle_ocr(image, lang="en")
+        assert results[0][1] == ("word", 0.9)
+
     def test_instance_cached_per_language(self, tmp_path: Path) -> None:
         image = tmp_path / "page.tiff"
         image.write_bytes(b"fake")

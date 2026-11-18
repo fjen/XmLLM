@@ -105,6 +105,10 @@ class TextLine(BaseModel):
     """A line of text — contains an ordered list of Words.
 
     Maps to <TextLine> in ALTO and PAGE XML.
+
+    `transcription` is the provider's line-level transcription — the
+    reference for word reconstruction (ADR 0001) and the exported text
+    when a line carries no reconstructed words (line-level fallback).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -114,13 +118,22 @@ class TextLine(BaseModel):
     confidence: float | None = Field(default=None, ge=0, le=1)
     lang: str | None = Field(default=None, pattern=ISO_LANG_PATTERN.pattern)
     provenance: Provenance
-    words: list[Word] = Field(min_length=1)
+    transcription: str | None = None
+    words: list[Word] = Field(default_factory=list)
     metadata: dict[str, Any] | None = None
 
     @property
     def text(self) -> str:
-        """Concatenated text of all words in this line."""
+        """Line text: the transcription if present, else the word texts."""
+        if self.transcription is not None:
+            return self.transcription
         return " ".join(w.text for w in self.words)
+
+    @model_validator(mode="after")
+    def _require_words_or_transcription(self) -> TextLine:
+        if not self.words and not self.transcription:
+            raise ValueError("TextLine needs words or a transcription")
+        return self
 
 
 # -- TextRegion (block) ------------------------------------------------------

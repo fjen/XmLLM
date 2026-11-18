@@ -55,6 +55,41 @@ class TestMergePaddleWords:
             "ab c", [("c", box(20, 0, 25, 9)), ("ab", box(0, 0, 15, 9))]
         ) is None
 
+    def test_match_may_not_skip_non_whitespace_text(self) -> None:
+        # ["aaa"] must not bind to the second "aaa" of "aaa aaa" and
+        # quietly leave the first occurrence uncovered.
+        assert merge_paddle_words("aaa aaa", [("aaa", box(0, 0, 9, 9))]) is None
+
+    def test_whitespace_gap_between_matches_is_allowed(self) -> None:
+        words = merge_paddle_words(
+            "aaa aaa",
+            [("aaa", box(0, 0, 9, 9)), ("aaa", box(12, 0, 21, 9))],
+        )
+        assert words == [
+            ("aaa", (0.0, 0.0, 9.0, 9.0)),
+            ("aaa", (12.0, 0.0, 21.0, 9.0)),
+        ]
+
+    def test_fragment_whitespace_is_trimmed_before_matching(self) -> None:
+        # A fragment " ä " maps to ä — no spaces forced into the word.
+        words = merge_paddle_words(
+            "Universität",
+            [
+                ("Universit", box(0, 0, 40, 9)),
+                (" ä ", box(40, 0, 48, 9)),
+                ("t", box(48, 0, 52, 9)),
+            ],
+        )
+        assert words == [("Universität", (0.0, 0.0, 52.0, 9.0))]
+
+    def test_fragment_with_internal_space_spans_two_tokens(self) -> None:
+        # "Die Universität" covers two tokens — measured per-word boxes
+        # are impossible, so the line is ambiguous.
+        assert merge_paddle_words(
+            "Die Universität",
+            [("Die Universität", box(0, 0, 60, 9))],
+        ) is None
+
     def test_fragment_spanning_two_words_is_ambiguous(self) -> None:
         """No estimated subdivisions — flag instead."""
         assert merge_paddle_words("a b", [("a b", box(0, 0, 20, 9))]) is None

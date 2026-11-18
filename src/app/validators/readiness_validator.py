@@ -27,7 +27,14 @@ if TYPE_CHECKING:
 def compute_page_alto_readiness(page: Page) -> AltoReadiness:
     """Compute ALTO readiness for a single page.
 
-    ALTO full requires: page dimensions, block bbox, line bbox, word bbox, word text.
+    ALTO full requires: page dimensions, block bbox, line bbox, and
+    word-level text/geometry on every line. Readiness is computed from the
+    canonical data only — a compatibility <String> with the line box is
+    evidence of neither WORD_TEXT nor WORD_GEOMETRY. Aggregation rule: any
+    line containing non-whitespace transcription text that lacks
+    word-level data (line-level fallback, ADR 0001) makes the page
+    PARTIAL; blank or whitespace-only lines do not. Word-level
+    capabilities are not critical, so such a page remains exportable.
     """
     missing: list[MissingCapability] = []
 
@@ -54,14 +61,21 @@ def compute_page_alto_readiness(page: Page) -> AltoReadiness:
                 and MissingCapability.LINE_GEOMETRY not in missing
             ):
                 missing.append(MissingCapability.LINE_GEOMETRY)
-            for word in line.words:
-                has_words = True
-                if word.geometry.status == GeometryStatus.UNKNOWN:
-                    has_word_geo = False
-                if not word.text:
-                    has_word_text = False
-                if word.confidence is None:
-                    has_confidence = False
+            if line.words:
+                for word in line.words:
+                    has_words = True
+                    if word.geometry.status == GeometryStatus.UNKNOWN:
+                        has_word_geo = False
+                    if not word.text:
+                        has_word_text = False
+                    if word.confidence is None:
+                        has_confidence = False
+            elif line.transcription and line.transcription.strip():
+                # Line-level fallback with actual text: no word geometry.
+                # Blank or whitespace-only lines carry nothing to locate
+                # and do not degrade the page.
+                has_word_text = False
+                has_word_geo = False
 
     if not has_blocks or not has_lines or not has_words:
         if not has_words:
@@ -81,10 +95,11 @@ def compute_page_alto_readiness(page: Page) -> AltoReadiness:
     if not page.reading_order:
         missing.append(MissingCapability.READING_ORDER)
 
+    # Word-level capabilities are no longer critical: a page whose lines
+    # carry only line-level transcriptions still exports valid ALTO with
+    # full text (compatibility <String>), so it is PARTIAL, not NONE.
     level = _level_from_missing(missing, critical={
         MissingCapability.PAGE_DIMENSIONS,
-        MissingCapability.WORD_TEXT,
-        MissingCapability.WORD_GEOMETRY,
         MissingCapability.LINE_GEOMETRY,
     })
 

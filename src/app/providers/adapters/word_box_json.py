@@ -170,14 +170,21 @@ class WordBoxJsonAdapter(BaseAdapter):
                 status=GeometryStatus.EXACT,
             )
 
-            line = region.add_line(line_id, geometry=geo, provenance=prov, lang=lang)
+            line = region.add_line(
+                line_id,
+                geometry=geo,
+                provenance=prov,
+                confidence=wd["confidence"],
+                lang=lang,
+                transcription=wd["text"],
+            )
 
             if wd["words"]:
-                # Real word boxes from the engine. Each box is measured
-                # provider output (the union of that word's recognition
-                # columns), so geometry stays EXACT; the whitespace merge
-                # that grouped the engine's sub-word tokens into these
-                # words is recorded as derived evidence.
+                # Real word boxes from the engine. Each box is the smallest
+                # axis-aligned rectangle enclosing that word's fragment
+                # boxes (measured provider output), so geometry stays
+                # EXACT; the transcription-anchored grouping that produced
+                # the words is recorded as derived evidence.
                 word_prov = Provenance(
                     provider=raw.provider_id,
                     adapter=self.version,
@@ -198,17 +205,12 @@ class WordBoxJsonAdapter(BaseAdapter):
                         confidence=wd["confidence"],
                         lang=lang,
                     )
-            else:
-                # Engine gave no word data: each detection becomes a line
-                # with one word spanning the whole line.
-                line.add_word(
-                    f"w{i + 1}",
-                    text=wd["text"],
-                    geometry=geo,
-                    provenance=prov,
-                    confidence=wd["confidence"],
-                    lang=lang,
-                )
+            # No word data (or ambiguous alignment): line-level fallback
+            # (ADR 0001). The line keeps its transcription and line polygon
+            # with NO word geometry — no fake word spanning the line. The
+            # ALTO serializer emits a compatibility <String> with the line
+            # box so full text survives export; that fallback does not
+            # meet the DFG Viewer's word-coordinate requirement.
 
         # Lines whose word fragments could not be mapped to the transcription
         # keep the line-level word (original data retained); flag the page
@@ -256,8 +258,8 @@ class WordBoxJsonAdapter(BaseAdapter):
         [word_text, [left, top, right, bottom]]. `ambiguous_reason` is set
         when the engine had word data but it could not be mapped to the line
         transcription (words is None then) — the caller keeps the line-level
-        word and flags the line. Two-element tuples and bare strings have
-        neither (None, None) — the caller falls back to one word per line.
+        transcription with no word geometry and flags the line. Two-element
+        tuples and bare strings have neither (None, None) — same fallback.
         """
         if isinstance(text_conf, (list, tuple)) and len(text_conf) in (2, 3, 4):
             text = str(text_conf[0])

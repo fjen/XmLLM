@@ -29,8 +29,10 @@ def stub_ocr(monkeypatch: pytest.MonkeyPatch) -> None:
 
     def fake_run_paddle_ocr(image_path: Path, lang: str) -> list:
         return [
-            [[[10, 10], [140, 10], [140, 40], [10, 40]], ("Hello", 0.97)],
-            [[[10, 50], [200, 50], [200, 80], [10, 80]], ("World", 0.93)],
+            [[[10, 10], [140, 10], [140, 40], [10, 40]],
+             ("Hello", 0.97, [["Hello", (10, 10, 140, 40)]])],
+            [[[10, 50], [200, 50], [200, 80], [10, 80]],
+             ("World", 0.93, [["World", (10, 50, 200, 80)]])],
         ]
 
     monkeypatch.setattr("src.app.ocr.run_paddle_ocr", fake_run_paddle_ocr)

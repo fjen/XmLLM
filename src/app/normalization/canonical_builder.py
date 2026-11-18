@@ -80,6 +80,7 @@ class LineBuilder:
         *,
         confidence: float | None = None,
         lang: str | None = None,
+        transcription: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
         self._line_id = line_id
@@ -87,6 +88,7 @@ class LineBuilder:
         self._provenance = provenance
         self._confidence = confidence
         self._lang = lang
+        self._transcription = transcription
         self._metadata = metadata
         self._words: list[WordBuilder] = []
 
@@ -120,14 +122,17 @@ class LineBuilder:
         return wb
 
     def build(self) -> TextLine:
-        if not self._words:
-            raise ValueError(f"Line {self._line_id} has no words")
+        if not self._words and not self._transcription:
+            raise ValueError(
+                f"Line {self._line_id} has neither words nor a transcription"
+            )
         return TextLine(
             id=self._line_id,
             geometry=self._geometry,
             provenance=self._provenance,
             confidence=self._confidence,
             lang=self._lang,
+            transcription=self._transcription,
             words=[w.build() for w in self._words],
             metadata=self._metadata,
         )
@@ -164,6 +169,7 @@ class RegionBuilder:
         *,
         confidence: float | None = None,
         lang: str | None = None,
+        transcription: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> LineBuilder:
         lb = LineBuilder(
@@ -172,6 +178,7 @@ class RegionBuilder:
             provenance,
             confidence=confidence,
             lang=lang,
+            transcription=transcription,
             metadata=metadata,
         )
         self._lines.append(lb)
