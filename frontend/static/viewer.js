@@ -358,14 +358,15 @@
       if (sel) sel.classList.add('sel');
     }
 
-    // Drop the details panel if the selected overlay is no longer shown.
+    // Hide the details panel if the selected overlay is no longer shown,
+    // but keep V.selectedId: re-enabling the level/chip restores both the
+    // .sel highlight and (on the next click) the details panel.
     if (V.selectedId && !V.details.classList.contains('hidden')) {
       const stillShown = overlays.some(o =>
         o.item.id === V.selectedId && V.levels[o.level]
         && !V.hidden.has(o.item.label || o.level));
       if (!stillShown) {
         V.details.classList.add('hidden');
-        V.selectedId = null;
       }
     }
   }
