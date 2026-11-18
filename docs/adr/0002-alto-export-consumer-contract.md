@@ -1,0 +1,28 @@
+# ALTO export targets the DFG-Viewer consumption path
+
+We verified how the target consumer reads our ALTO. An agent built a mixed-page export from a real OCR payload (434 lines with reconstructed words, 7 line-level fallback lines) and checked two things: validation against the official ALTO v4 schema, and the source code of the DFG-Viewer (github.com/slub/dfg-viewer). We decided to keep the export shape and record the consumer contract here, because it constrains every future change to `alto_xml.py`.
+
+## What the consumer does (verified in source)
+
+The DFG-Viewer contains almost no ALTO logic. It delegates to Kitodo Presentation (`composer.json` requires `kitodo/presentation: ^7.1`). The parser is `Classes/Format/Alto.php` in that repository. The facts below cite that file.
+
+- The parser registers namespaces ns-v2, ns-v3 and ns-v4 explicitly (`Alto.php:153-167`). Our `ns-v4` URI is supported.
+- Both consumption paths (raw fulltext and the MiniOCR word list) select `Layout/Page/PrintSpace/TextBlock/TextLine/String` (`Alto.php:44` and `Alto.php:79`). Our structure matches.
+- Raw fulltext joins each `String` `CONTENT` with a space (`Alto.php:50-62`). `SP` elements are ignored. Spacing is synthesized, so `<SP>` matters for the schema, not for this consumer.
+- Coordinates are copied verbatim: `getCoordinates` returns `HPOS`, `VPOS`, `WIDTH`, `HEIGHT` unchanged (`Alto.php:140-144`). Our `MeasurementUnit="pixel"` matches the page-pixel space we export.
+- Element IDs are never read. The `_str` suffix on compatibility Strings is invisible to the consumer.
+- Hyphenation: `getRawText` assumes a `HypPart1` String is immediately followed by its `HypPart2` in document order, and joins them (`Alto.php:52-62`). The serializer emits `SUBS_TYPE`/`SUBS_CONTENT` when the `HyphenationBasicEnricher` marks a pair. The constraint is that a marked pair stays adjacent in export order. It does: pairs come from consecutive lines, and words export in line order. Verified on a real page: 12 pairs marked, 24 `SUBS_TYPE` attributes in the export, so the Kitodo join fires in practice.
+- Known hyphenation gaps, from the enricher's documented heuristic (line ends with `-`, next line starts lowercase): a continuation that starts uppercase is not marked (`Kran-` / `Branntwein`), so raw fulltext keeps the hyphen and the space for those words. And a lowercase continuation can be a mis-pair (`Min.-Wasser-` + `und` reads like a list hyphen, not a word hyphen). The heuristic is basic by design; expect both error types in fulltext on dense directory text.
+
+## Schema validation
+
+The mixed-page export validates against the official `alto-4-2.xsd` (fetched from www.loc.gov/standards/alto/v4/alto-4-2.xsd) with zero errors. Note: the GitHub mirror `altoxml/schema` does not carry alto-4-2.xsd. LOC is the authoritative host.
+
+Schema validation is not wired into CI. It needs a network fetch of the XSD. Re-run the validation by hand when the serializer changes.
+
+## Consequences
+
+- Compatibility Strings from the line-level fallback (ADR 0001) are safe for this consumer. Each renders as one word spanning the line box. Clicking or highlighting a "word" in such a line highlights the whole line. Word-precision interaction is lost on those lines only.
+- Every `TextLine` must contain at least one `String`. The canonical invariant (words or transcription, never neither) guarantees this. Keep it.
+- `SP` stays in the export. The XSD content model expects it between Strings, and other consumers do read it.
+- Do not rely on element IDs in ALTO for anything consumer-facing. They are our bookkeeping.

@@ -25,7 +25,7 @@ The matching invariant: the ordered fragment matches cover every non-whitespace 
 
 When the invariant fails, we do not derive word geometry. The line keeps its transcription and its line polygon. The canonical model has no word for this line. We do not put a fake word across the line.
 
-The ALTO serializer writes a compatibility `<String>` with the line box. Full text survives the export. This `<String>` does not meet the word-coordinate requirement of the DFG Viewer.
+The ALTO serializer writes a compatibility `<String>` with the line box. Full text survives the export. This `<String>` does not meet the word-coordinate requirement of the DFG Viewer. The consumer contract, verified in source, is recorded in ADR 0002.
 
 We never estimate word coordinates. We never split a line polygon in proportion to whitespace.
 
