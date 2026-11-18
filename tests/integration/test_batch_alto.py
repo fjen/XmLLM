@@ -370,7 +370,7 @@ class TestNoImageCopy:
         job_dir = next((tmp_path / "storage" / "jobs").iterdir())
         artifacts = {p.name for p in job_dir.iterdir()}
         assert artifacts == {
-            "raw_payload.json", "canonical.json", "alto.xml",
-            "page.xml", "viewer.json", "events.json",
+            "raw_payload.json.zst", "canonical.json.zst", "alto.xml",
+            "page.xml", "viewer.json.zst", "events.json.zst",
         }
         assert not any(p.stem == "input" for p in job_dir.iterdir())

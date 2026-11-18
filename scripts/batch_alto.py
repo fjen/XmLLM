@@ -6,8 +6,8 @@ Runs the full XmLLM pipeline in-process, no server:
     RawProviderPayload → canonical → enrichers → validation → ALTO XML
 
 Each image becomes one job persisted under STORAGE_ROOT/jobs/<job_id>/
-(alto.xml, canonical.json, events.json, ...) — the same artifacts the HTTP
-API would produce, so the audit trail stays intact.
+(alto.xml, canonical.json.zst, events.json.zst, ...) — the same artifacts
+the HTTP API would produce, so the audit trail stays intact.
 
 Usage:
     python scripts/batch_alto.py /path/to/book1 /path/to/book2
@@ -24,6 +24,7 @@ import argparse
 import os
 import shutil
 import sys
+import traceback
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -213,6 +214,9 @@ def main(argv: list[str] | None = None) -> int:
             except Exception as exc:  # keep batch going on per-file errors
                 failures.append((tif.name, f"{type(exc).__name__}: {exc}"))
                 print(f"FAILED  {tif.name}: {type(exc).__name__}: {exc}", file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
+                # full stack: transient failures (e.g. mid-run env changes)
+                # are not reproducible per-file
                 continue
 
             if alto_path is None:

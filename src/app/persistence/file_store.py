@@ -4,13 +4,17 @@ Storage layout:
     {STORAGE_ROOT}/
       jobs/
         {job_id}/
-          input.{ext}        — original uploaded image
-          raw_payload.json   — RawProviderPayload
-          canonical.json     — CanonicalDocument
-          alto.xml           — ALTO XML export
-          page.xml           — PAGE XML export
-          viewer.json        — ViewerProjection
-          events.json        — job events log
+          input.{ext}        — original uploaded image (UI jobs only)
+          raw_payload.json.zst
+          canonical.json.zst
+          alto.xml           — ALTO XML export (uncompressed)
+          page.xml           — PAGE XML export (uncompressed)
+          viewer.json.zst
+          events.json.zst
+
+JSON artifacts are zstd-compressed and carry a `.json.zst` suffix. Loaders
+also accept the legacy uncompressed `.json` names, so existing storage
+roots keep working without migration.
 """
 
 from __future__ import annotations
@@ -19,6 +23,21 @@ import json
 import shutil
 from pathlib import Path
 from typing import Any
+
+import zstandard
+
+_ZSTD_COMPRESSOR = zstandard.ZstdCompressor(level=3)
+
+
+def _write_zst(dest: Path, data: bytes) -> None:
+    dest.write_bytes(_ZSTD_COMPRESSOR.compress(data))
+
+
+def _read_zst(path: Path) -> bytes:
+    """Decompress a zstd file; tolerates frames without content size."""
+    dctx = zstandard.ZstdDecompressor()
+    with open(path, "rb") as f, dctx.stream_reader(f) as reader:
+        return reader.read()
 
 
 class FileStore:
@@ -57,10 +76,11 @@ class FileStore:
         return dest
 
     def save_json(self, job_id: str, filename: str, data: Any) -> Path:
-        """Save a JSON-serializable object."""
-        dest = self.job_dir(job_id) / self._sanitize_id(filename)
-        content = json.dumps(data, ensure_ascii=False, indent=2, default=str)
-        dest.write_text(content, encoding="utf-8")
+        """Save a JSON-serializable object, zstd-compressed (`.json.zst`)."""
+        dest = self.job_dir(job_id) / self._sanitize_id(f"{filename}.zst")
+        _write_zst(
+            dest, json.dumps(data, ensure_ascii=False, indent=2, default=str).encode("utf-8")
+        )
         return dest
 
     def save_bytes(self, job_id: str, filename: str, data: bytes) -> Path:
@@ -90,11 +110,16 @@ class FileStore:
     # -- Load artifacts -------------------------------------------------------
 
     def load_json(self, job_id: str, filename: str) -> Any:
-        """Load a JSON file from the job directory. Returns None if not found."""
-        path = self._jobs_dir / self._sanitize_id(job_id) / self._sanitize_id(filename)
-        if not path.exists():
-            return None
-        return json.loads(path.read_text(encoding="utf-8"))
+        """Load a JSON artifact. Reads `.json.zst`, falls back to the
+        legacy uncompressed `.json`. Returns None if neither exists."""
+        d = self._jobs_dir / self._sanitize_id(job_id)
+        zst = d / self._sanitize_id(f"{filename}.zst")
+        if zst.exists():
+            return json.loads(_read_zst(zst))
+        legacy = d / self._sanitize_id(filename)
+        if legacy.exists():
+            return json.loads(legacy.read_text(encoding="utf-8"))
+        return None
 
     def load_bytes(self, job_id: str, filename: str) -> bytes | None:
         """Load raw bytes. Returns None if not found."""
@@ -138,28 +163,39 @@ class FileStore:
     # -- Provider profiles ----------------------------------------------------
 
     def save_provider(self, provider_id: str, data: dict) -> Path:
-        dest = self._providers_dir / f"{self._sanitize_id(provider_id)}.json"
-        content = json.dumps(data, ensure_ascii=False, indent=2, default=str)
-        dest.write_text(content, encoding="utf-8")
+        dest = self._providers_dir / f"{self._sanitize_id(provider_id)}.json.zst"
+        _write_zst(
+            dest, json.dumps(data, ensure_ascii=False, indent=2, default=str).encode("utf-8")
+        )
         return dest
 
     def load_provider(self, provider_id: str) -> dict | None:
-        path = self._providers_dir / f"{self._sanitize_id(provider_id)}.json"
-        if not path.exists():
-            return None
-        return json.loads(path.read_text(encoding="utf-8"))
+        zst = self._providers_dir / f"{self._sanitize_id(provider_id)}.json.zst"
+        if zst.exists():
+            return json.loads(_read_zst(zst))
+        legacy = self._providers_dir / f"{self._sanitize_id(provider_id)}.json"
+        if legacy.exists():
+            return json.loads(legacy.read_text(encoding="utf-8"))
+        return None
 
     def list_providers(self) -> list[str]:
         if not self._providers_dir.exists():
             return []
-        return [f.stem for f in self._providers_dir.glob("*.json")]
+        names: set[str] = set()
+        for f in self._providers_dir.glob("*.json.zst"):
+            names.add(f.name.removesuffix(".json.zst"))
+        for f in self._providers_dir.glob("*.json"):  # legacy
+            names.add(f.stem)
+        return sorted(names)
 
     def delete_provider(self, provider_id: str) -> bool:
-        path = self._providers_dir / f"{self._sanitize_id(provider_id)}.json"
-        if path.exists():
-            path.unlink()
-            return True
-        return False
+        removed = False
+        for suffix in (".json.zst", ".json"):  # legacy fallback
+            path = self._providers_dir / f"{self._sanitize_id(provider_id)}{suffix}"
+            if path.exists():
+                path.unlink()
+                removed = True
+        return removed
 
     # -- Listing --------------------------------------------------------------
 
@@ -175,6 +211,8 @@ class FileStore:
         return (self._jobs_dir / self._sanitize_id(job_id)).exists()
 
     def job_has_artifact(self, job_id: str, filename: str) -> bool:
+        d = self._jobs_dir / self._sanitize_id(job_id)
         return (
-            self._jobs_dir / self._sanitize_id(job_id) / self._sanitize_id(filename)
-        ).exists()
+            (d / self._sanitize_id(f"{filename}.zst")).exists()
+            or (d / self._sanitize_id(filename)).exists()  # legacy
+        )

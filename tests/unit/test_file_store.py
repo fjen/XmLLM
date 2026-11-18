@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 from src.app.persistence.file_store import FileStore
@@ -104,3 +105,54 @@ class TestFileStore:
         assert result.exists()
         assert result.name == "input.png"
         assert store.get_input_image_path("job_001") == result
+
+
+class TestZstdCompression:
+    def test_save_json_writes_compressed_zst(self, tmp_storage: Path) -> None:
+        store = FileStore(tmp_storage)
+        # Repetitive content so the size win is measurable on a small file.
+        data = {"text": "lorem ipsum " * 200, "n": 42}
+        plain = json.dumps(data).encode()
+        dest = store.save_json("job_001", "canonical.json", data)
+
+        assert dest.name == "canonical.json.zst"
+        raw = dest.read_bytes()
+        assert raw[:4] == b"\x28\xb5\x2f\xfd"  # zstd frame magic
+        assert len(raw) < len(plain)  # actually compressed
+        assert store.load_json("job_001", "canonical.json") == data
+
+    def test_load_legacy_plain_json(self, tmp_storage: Path) -> None:
+        store = FileStore(tmp_storage)
+        d = tmp_storage / "jobs" / "job_001"
+        d.mkdir(parents=True)
+        (d / "viewer.json").write_text('{"a": 1}', encoding="utf-8")
+
+        assert store.load_json("job_001", "viewer.json") == {"a": 1}
+        assert store.job_has_artifact("job_001", "viewer.json")
+
+    def test_zst_preferred_over_legacy(self, tmp_storage: Path) -> None:
+        store = FileStore(tmp_storage)
+        d = tmp_storage / "jobs" / "job_001"
+        d.mkdir(parents=True)
+        (d / "canonical.json").write_text('{"v": "legacy"}', encoding="utf-8")
+        store.save_json("job_001", "canonical.json", {"v": "zstd"})
+
+        assert store.load_json("job_001", "canonical.json") == {"v": "zstd"}
+
+    def test_provider_zst_and_legacy(self, tmp_storage: Path) -> None:
+        store = FileStore(tmp_storage)
+        store.ensure_dirs()
+        store.save_provider("p1", {"provider_id": "p1"})
+        assert (tmp_storage / "providers" / "p1.json.zst").exists()
+
+        # A legacy plain provider file still loads and lists.
+        (tmp_storage / "providers" / "p2.json").write_text(
+            '{"provider_id": "p2"}', encoding="utf-8"
+        )
+        assert store.load_provider("p2") == {"provider_id": "p2"}
+        assert store.list_providers() == ["p1", "p2"]
+
+        assert store.delete_provider("p2") is True
+        assert not (tmp_storage / "providers" / "p2.json").exists()
+        assert store.delete_provider("p1") is True
+        assert store.load_provider("p1") is None
