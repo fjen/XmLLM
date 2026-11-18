@@ -51,3 +51,4 @@ exports/
 # Node (frontend)
 frontend/node_modules/
 frontend/dist/
+uv.lock

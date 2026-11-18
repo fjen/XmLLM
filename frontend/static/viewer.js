@@ -235,9 +235,10 @@
     // it (ported renderFilters). Line/word overlays are labelled with their
     // OCR text — chips for those would explode the toolbar and hiding by
     // text occurrence would be meaningless — so they are level-toggled only.
+    // Counts are static per document: chips stay visible even while their
+    // level toggle is off (refreshOverlays keeps their pressed state true).
     const counts = {};
     overlays.forEach(o => {
-      if (!V.levels[o.level]) return;
       if (o.level === 'line' || o.level === 'word') return;
       const label = o.item.label || o.level;
       counts[label] = (counts[label] || 0) + 1;
@@ -294,7 +295,9 @@
     // Fullscreen toggle (browser Fullscreen API; ESC exits). The label is
     // updated from the fullscreenchange event so it stays correct when the
     // user exits via ESC instead of the button.
-    const fs = el('button', null, '\u26f6 Fullscreen');
+    const fs = el('button', null, document.fullscreenElement
+      ? '\u26f6 Exit fullscreen'
+      : '\u26f6 Fullscreen');
     fs.title = 'Toggle fullscreen (ESC to exit)';
     fs.onclick = () => {
       if (document.fullscreenElement) {
@@ -337,13 +340,23 @@
       });
     }
 
-    // Boxes, polygons and cards for the currently shown set.
+    // Boxes, polygons and cards for the currently shown set. Card pane
+    // scroll is preserved across the rebuild (visible in fullscreen).
+    const scroll = V.cards.scrollTop;
     V.page.querySelectorAll('.xbox').forEach(n => n.remove());
     V.svg.querySelectorAll('.poly-shape').forEach(n => n.remove());
     V.cards.replaceChildren();
     if (V.spy) V.spy.disconnect();
     renderOverlays(V.data, overlays, V.page, V.svg, V.cards);
+    V.cards.scrollTop = scroll;
     V.cards.querySelectorAll('.viewer-card').forEach(c => V.spy.observe(c));
+
+    // Re-apply the selection highlight to the rebuilt card, if still shown.
+    if (V.selectedId) {
+      const sel = V.cards.querySelector(
+        '[data-i="' + CSS.escape(V.selectedId) + '"]');
+      if (sel) sel.classList.add('sel');
+    }
 
     // Drop the details panel if the selected overlay is no longer shown.
     if (V.selectedId && !V.details.classList.contains('hidden')) {
