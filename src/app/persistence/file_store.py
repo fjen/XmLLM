@@ -109,17 +109,26 @@ class FileStore:
 
     # -- Load artifacts -------------------------------------------------------
 
-    def load_json(self, job_id: str, filename: str) -> Any:
-        """Load a JSON artifact. Reads `.json.zst`, falls back to the
-        legacy uncompressed `.json`. Returns None if neither exists."""
+    def _resolve_artifact(self, job_id: str, filename: str) -> Path | None:
+        """Single source of the dual-name rule: `.json.zst` first, then the
+        legacy uncompressed `.json`. Used by every reader/checker."""
         d = self._jobs_dir / self._sanitize_id(job_id)
         zst = d / self._sanitize_id(f"{filename}.zst")
         if zst.exists():
-            return json.loads(_read_zst(zst))
+            return zst
         legacy = d / self._sanitize_id(filename)
         if legacy.exists():
-            return json.loads(legacy.read_text(encoding="utf-8"))
+            return legacy
         return None
+
+    def load_json(self, job_id: str, filename: str) -> Any:
+        """Load a JSON artifact (.json.zst, or legacy .json). None if absent."""
+        path = self._resolve_artifact(job_id, filename)
+        if path is None:
+            return None
+        if path.name.endswith(".zst"):
+            return json.loads(_read_zst(path))
+        return json.loads(path.read_text(encoding="utf-8"))
 
     def load_bytes(self, job_id: str, filename: str) -> bytes | None:
         """Load raw bytes. Returns None if not found."""
@@ -211,8 +220,4 @@ class FileStore:
         return (self._jobs_dir / self._sanitize_id(job_id)).exists()
 
     def job_has_artifact(self, job_id: str, filename: str) -> bool:
-        d = self._jobs_dir / self._sanitize_id(job_id)
-        return (
-            (d / self._sanitize_id(f"{filename}.zst")).exists()
-            or (d / self._sanitize_id(filename)).exists()  # legacy
-        )
+        return self._resolve_artifact(job_id, filename) is not None
