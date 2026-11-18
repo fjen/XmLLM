@@ -389,6 +389,43 @@ class TestWordLevelPayload:
         with pytest.raises(ValueError, match="word 0"):
             adapter.normalize(raw, geo_ctx, document_id="d")
 
+    def test_empty_text_detection_skipped(
+        self, adapter: WordBoxJsonAdapter, geo_ctx: GeometryContext
+    ) -> None:
+        """PaddleOCR can emit a box with an empty transcription. It has no
+        line to build and must not crash the normalize step."""
+        payload = [
+            [[[10, 10], [110, 10], [110, 40], [10, 40]], ("", 0.5)],
+            [[[10, 60], [110, 60], [110, 90], [10, 90]], ("Real", 0.9)],
+            [[[10, 110], [110, 110], [110, 140], [10, 140]], ("   ", 0.4)],
+        ]
+        raw = RawProviderPayload(
+            provider_id="paddleocr",
+            adapter_id="adapter.word_box_json.v1",
+            runtime_type="local",
+            payload=payload,
+            image_width=200,
+            image_height=160,
+        )
+        doc = adapter.normalize(raw, geo_ctx, document_id="d")
+        lines = doc.pages[0].text_regions[0].lines
+        assert [ln.transcription for ln in lines] == ["Real"]
+
+    def test_all_empty_text_payload_raises(
+        self, adapter: WordBoxJsonAdapter, geo_ctx: GeometryContext
+    ) -> None:
+        payload = [[[[10, 10], [110, 10], [110, 40], [10, 40]], ("", 0.5)]]
+        raw = RawProviderPayload(
+            provider_id="paddleocr",
+            adapter_id="adapter.word_box_json.v1",
+            runtime_type="local",
+            payload=payload,
+            image_width=200,
+            image_height=120,
+        )
+        with pytest.raises(ValueError, match="no items"):
+            adapter.normalize(raw, geo_ctx, document_id="d")
+
     def test_ambiguous_line_falls_back_and_warns(
         self, adapter: WordBoxJsonAdapter, geo_ctx: GeometryContext
     ) -> None:

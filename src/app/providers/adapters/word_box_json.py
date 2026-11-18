@@ -84,6 +84,11 @@ class WordBoxJsonAdapter(BaseAdapter):
             points, text_conf = self._parse_item(item, idx)
             text, confidence, words, reason = self._parse_text_conf(text_conf, idx)
 
+            if not text.strip():
+                # A detection without recognized text has no line to build.
+                # PaddleOCR can emit a box whose transcription is empty.
+                continue
+
             bbox = four_point_to_xywh(points)
             polygon = four_point_to_polygon(points)
 
