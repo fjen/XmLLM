@@ -86,7 +86,6 @@ def process_image(
     from src.app.domain.models import RawProviderPayload
     from src.app.ocr import (
         paddle_lang_to_iso639_3,
-        paddle_result_to_payload,
         run_paddle_ocr,
     )
 
@@ -102,7 +101,7 @@ def process_image(
         provider_id="paddleocr",
         adapter_id="adapter.word_box_json.v1",
         runtime_type="local",
-        payload=paddle_result_to_payload(results),
+        payload=results,
         image_width=image_width,
         image_height=image_height,
         metadata={"language": iso_lang} if iso_lang else None,

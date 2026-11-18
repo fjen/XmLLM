@@ -18,7 +18,22 @@ _OCR_CACHE_LIMIT = 8
 
 
 def _get_ocr(lang: str) -> Any:
-    """Lazy-load PaddleOCR (heavy import, ~2s first time), one instance per language."""
+    """Lazy-load PaddleOCR 3.x, one instance per language.
+
+    Coordinate contract: rec_polys are in the ORIGINAL image's pixel space —
+    the same space the viewer's `/jobs/{id}/image` serves. To keep that
+    guarantee, the coordinate-altering preprocessors are disabled:
+    `use_doc_unwarping=False` (UVDoc would return polys in dewarped space)
+    and `use_doc_orientation_classify=False` (a rotated/upside-down upload
+    would otherwise return polys in rotated space while the viewer still
+    draws the unrotated bytes — silently wrong overlays). Rotated input
+    must be corrected before upload; OCR quality on uncorrected rotated
+    input degrades, which is honest and visible. Both flags also skip two
+    model loads per instance.
+
+    `enable_mkldnn=False` works around a paddle 3.3 oneDNN/PIR bug
+    (ConvertPirAttribute2RuntimeAttribute) that crashes PP-OCRv6 inference.
+    """
     if lang in _ocr_instances:
         instance = _ocr_instances.pop(lang)
         _ocr_instances[lang] = instance  # move to end → LRU
@@ -26,51 +41,49 @@ def _get_ocr(lang: str) -> Any:
     if len(_ocr_instances) >= _OCR_CACHE_LIMIT:
         _ocr_instances.pop(next(iter(_ocr_instances)))
     from paddleocr import PaddleOCR
-    _ocr_instances[lang] = PaddleOCR(use_angle_cls=True, lang=lang, show_log=False)
+    _ocr_instances[lang] = PaddleOCR(
+        lang=lang,
+        use_textline_orientation=True,
+        use_doc_orientation_classify=False,
+        use_doc_unwarping=False,
+        enable_mkldnn=False,
+    )
     return _ocr_instances[lang]
 
 
 def run_paddle_ocr(image_path: Path, lang: str) -> list[Any]:
-    """Run PaddleOCR on an image file.
-
-    Args:
-        image_path: image to process.
-        lang: PaddleOCR language code (e.g. 'en', 'fr', 'de').
-
-    Returns the raw PaddleOCR result in word_box_json format:
-        [[[x1,y1],[x2,y2],[x3,y3],[x4,y4]], ("text", confidence)]
+    """Run PaddleOCR (3.x `predict`) and return the word_box_json payload:
+        [[4-point polygon, (text, confidence)], ...]
     """
     ocr = _get_ocr(lang)
-    results = ocr.ocr(str(image_path), cls=True)
-    if not results or not results[0]:
-        return []
-    return results[0]
-
-
-def paddle_result_to_payload(results: list[Any]) -> list[Any]:
-    """Convert PaddleOCR results to the word_box_json payload format."""
-    payload = []
-    for item in results:
-        points = item[0]
-        text, conf = item[1]
-        payload.append([points, [text, conf]])
+    results = ocr.predict(str(image_path))
+    payload: list[Any] = []
+    for res in results:
+        polys = res["rec_polys"]
+        texts = res["rec_texts"]
+        scores = res["rec_scores"]
+        for poly, text, score in zip(polys, texts, scores, strict=True):
+            points = [[float(x), float(y)] for x, y in poly]
+            payload.append([points, (str(text), float(score))])
     return payload
 
 
 # PaddleOCR language codes → ISO 639-3 (the canonical model requires
 # ^[a-z]{3}$, and ALTO LANG expects ISO 639-2/3). Keys verified against
-# paddleocr 2.8–2.10 `parse_lang` aliasing (2-letter codes map to script
-# groups; plus direct keys and legacy aliases). Codes PaddleOCR 2.x does
-# not accept (e.g. fi, ja, ko, zh) are deliberately absent. Unmapped
-# codes return None — lang stays unset and ALTO omits LANG rather than
-# guessing.
+# paddleocr 3.7 model selection (_pipelines/ocr.py): PP-OCRv6 langs
+# ({ch, chinese_cht, en, japan} ∪ LATIN_LANGS) plus the PP-OCRv5/v3
+# script codes (korean, th, el, te, ta, ka, and the script groups).
+# ch_doc existed only in 2.x model dicts and is deliberately absent.
+# Unmapped codes return None — lang stays unset and ALTO omits LANG
+# rather than guessing.
 _PADDLE_LANG_TO_ISO3 = {
     "en": "eng", "fr": "fra", "de": "deu", "es": "spa", "it": "ita",
     "pt": "por", "nl": "nld", "pl": "pol", "sv": "swe", "ru": "rus",
-    "uk": "ukr", "bg": "bul", "cs": "ces", "da": "dan",
+    "uk": "ukr", "bg": "bul", "cs": "ces", "da": "dan", "fi": "fin",
     "hu": "hun", "ro": "ron", "tr": "tur", "ar": "ara", "hi": "hin",
-    "ch": "zho", "ch_doc": "zho", "chinese_cht": "zho",
-    "japan": "jpn", "korean": "kor", "french": "fra", "german": "deu",
+    "ch": "zho", "chinese_cht": "zho", "japan": "jpn", "korean": "kor",
+    "french": "fra", "german": "deu", "th": "tha", "el": "ell",
+    "te": "tel", "ta": "tam", "ka": "kat",
 }
 
 

@@ -11,25 +11,9 @@ from typing import TYPE_CHECKING
 import pytest
 from fastapi.testclient import TestClient
 from lxml import etree
-from src.app.main import app
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-
-@pytest.fixture
-def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    """TestClient with lifespan — ensures DB/FileStore/JobService are initialized."""
-    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "data"))
-    # Force re-creation of settings
-    from src.app import settings as settings_mod
-    monkeypatch.setattr(
-        settings_mod,
-        "get_settings",
-        lambda: settings_mod.Settings(storage_root=tmp_path / "data"),
-    )
-    with TestClient(app) as c:
-        yield c
 
 
 @pytest.fixture

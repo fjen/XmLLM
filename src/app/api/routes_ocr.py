@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -87,17 +88,17 @@ async def ocr_image(image: UploadFile, lang: str = "fr") -> dict[str, Any]:
 
         from src.app.ocr import (
             paddle_lang_to_iso639_3,
-            paddle_result_to_payload,
             run_paddle_ocr,
         )
+        ocr_started = time.monotonic()
         try:
             results = run_paddle_ocr(tmp_path, lang=lang)
         except (ValueError, AssertionError, SystemExit) as exc:
-            # How paddleocr 2.x signals an unusable lang/config:
-            # parse_lang ends in a bare `assert` → AssertionError (stripped
-            # under python -O, after which get_model_config calls
-            # sys.exit(-1) → SystemExit). Log server-side, return no
-            # internals. The allowlist gate above is the primary defense.
+            # paddleocr signals an unusable lang/config: 3.x raises ValueError
+            # ("No models are available for lang=..."); 2.x used a bare assert
+            # in parse_lang (AssertionError, or SystemExit via sys.exit in
+            # get_model_config). Log server-side, return no internals. The
+            # allowlist gate above is the primary defense.
             logger.exception("PaddleOCR rejected lang=%s", lang)
             raise HTTPException(
                 status_code=422,
@@ -118,14 +119,12 @@ async def ocr_image(image: UploadFile, lang: str = "fr") -> dict[str, Any]:
                 detail="PaddleOCR found no text in this image",
             )
 
-        payload = paddle_result_to_payload(results)
-
         iso_lang = paddle_lang_to_iso639_3(lang)
         raw = RawProviderPayload(
             provider_id="paddleocr",
             adapter_id="adapter.word_box_json.v1",
             runtime_type="local",
-            payload=payload,
+            payload=results,
             image_width=image_width,
             image_height=image_height,
             metadata={"language": iso_lang} if iso_lang else None,
@@ -145,7 +144,11 @@ async def ocr_image(image: UploadFile, lang: str = "fr") -> dict[str, Any]:
             image_path=tmp_path,
         )
 
-        return result.to_summary()
+        # duration_ms covers only the canonical pipeline (run_job span); the
+        # engine call happens before it and dominates real runs — report both.
+        summary = result.to_summary()
+        summary["ocr_ms"] = round((time.monotonic() - ocr_started) * 1000)
+        return summary
 
     finally:
         tmp_path.unlink(missing_ok=True)

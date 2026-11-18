@@ -17,12 +17,22 @@ class _FakePaddleOCR:
 
     instances: list[_FakePaddleOCR] = []
 
-    def __init__(self, *, use_angle_cls: bool, lang: str, show_log: bool) -> None:
+    def __init__(
+        self, *, lang: str, use_textline_orientation: bool,
+        use_doc_orientation_classify: bool, use_doc_unwarping: bool,
+        enable_mkldnn: bool,
+    ) -> None:
         self.lang = lang
         _FakePaddleOCR.instances.append(self)
 
-    def ocr(self, image_path: str, cls: bool) -> list[Any]:
-        return [[[[1, 1], [2, 1], [2, 2], [1, 2]], ("word", 0.9)]]
+    def predict(self, image_path: str) -> list[dict[str, Any]]:
+        return [
+            {
+                "rec_polys": [[[1, 1], [2, 1], [2, 2], [1, 2]]],
+                "rec_texts": ["word"],
+                "rec_scores": [0.9],
+            }
+        ]
 
 
 @pytest.fixture(autouse=True)
@@ -47,9 +57,9 @@ class TestRunPaddleOcrLang:
 
         assert len(_FakePaddleOCR.instances) == 1
         assert _FakePaddleOCR.instances[0].lang == "fr"
-        # Result shape passes through unchanged: [points, (text, conf)]
-        assert results[0] == [[1, 1], [2, 1], [2, 2], [1, 2]]
-        assert results[1] == ("word", 0.9)
+        # Payload shape: [4-point polygon, (text, confidence)]
+        assert results[0][0] == [[1.0, 1.0], [2.0, 1.0], [2.0, 2.0], [1.0, 2.0]]
+        assert results[0][1] == ("word", 0.9)
 
     def test_instance_cached_per_language(self, tmp_path: Path) -> None:
         image = tmp_path / "page.tiff"
@@ -87,10 +97,12 @@ class TestSupportedLangs:
 
         assert "fr" in SUPPORTED_PADDLE_LANGS
         assert "en" in SUPPORTED_PADDLE_LANGS
+        assert "fi" in SUPPORTED_PADDLE_LANGS
         assert "japan" in SUPPORTED_PADDLE_LANGS
         assert "chinese_cht" in SUPPORTED_PADDLE_LANGS
-        # Codes PaddleOCR does not accept are not allowlisted
+        # Codes paddleocr 3.x does not accept are not allowlisted
         assert "ja" not in SUPPORTED_PADDLE_LANGS
+        assert "ch_doc" not in SUPPORTED_PADDLE_LANGS
         assert "xyz" not in SUPPORTED_PADDLE_LANGS
 
 
@@ -106,12 +118,16 @@ class TestPaddleLangToIso6393:
             ("eng", "eng"),  # already ISO 639-3
             ("fra", "fra"),
             ("japan", "jpn"),  # PaddleOCR legacy alias
-            ("korean", "kor"),
             ("ch", "zho"),
-            ("ch_doc", "zho"),
             ("chinese_cht", "zho"),
             ("french", "fra"),
             ("german", "deu"),
+            ("fi", "fin"),  # LATIN in paddleocr 3.x
+            ("th", "tha"),  # PP-OCRv5 script codes
+            ("el", "ell"),
+            ("te", "tel"),
+            ("ta", "tam"),
+            ("ka", "kat"),
         ],
     )
     def test_known_mappings(self, paddle_lang: str, expected: str) -> None:
@@ -119,7 +135,7 @@ class TestPaddleLangToIso6393:
 
     @pytest.mark.parametrize(
         "unknown",
-        ["xx", "fi", "ja", "ko", "zh", "el", "xyz", "zh_CN", "", "123", "fàr"],
+        ["xx", "ja", "ko", "zh", "ch_doc", "xyz", "zh_CN", "", "123", "fàr"],
     )
     def test_unknown_codes_return_none(self, unknown: str) -> None:
         assert paddle_lang_to_iso639_3(unknown) is None
