@@ -57,6 +57,10 @@ class ExportEligibility(BaseModel):
     alto_export: ReadinessLevel = ReadinessLevel.NONE
     page_export: ReadinessLevel = ReadinessLevel.NONE
     viewer_render: ReadinessLevel = ReadinessLevel.NONE
+    # Union of the per-page ALTO missing capabilities, so export policy can
+    # apply fine-grained rules (e.g. require_words_for_alto) without
+    # re-deriving readiness.
+    alto_missing: list[MissingCapability] = Field(default_factory=list)
 
 
 class DocumentReadiness(BaseModel):

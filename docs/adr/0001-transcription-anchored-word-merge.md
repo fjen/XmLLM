@@ -73,7 +73,10 @@ lines, and the page is flagged like any other fallback.
   containing **non-whitespace** transcription text that lacks word-level
   data makes the page PARTIAL; blank or whitespace-only lines do not.
   Word-level capabilities are not critical, so such a page remains
-  exportable under the default policy.
+  exportable under the default policy. `DocumentPolicy.require_words_for_alto`
+  (default off) is enforced at the policy boundary for operators who want
+  to refuse compatibility exports; `allow_partial_alto` remains the
+  coarse knob.
 - Word boxes carry bbox-only geometry (`polygon=None`); polygons stay on
   the line. Word provenance is `derived` (`$[i].text_word`).
 - A document mislabeled with an excluded language loses reconstruction —

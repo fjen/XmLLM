@@ -317,7 +317,8 @@ class TestWordLevelPayload:
                     [["Hello", (10, 10, 50, 40)], ["world", (60, 10, 110, 40)]],
                 ),
             ],
-            # Line without word data → fallback single word
+            # Line without word data → line-level fallback: no words, the
+            # transcription lives on the line (ADR 0001)
             [[[10, 60], [110, 60], [110, 90], [10, 90]], ("Second", 0.8)],
         ]
         return RawProviderPayload(

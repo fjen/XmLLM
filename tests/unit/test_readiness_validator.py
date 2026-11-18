@@ -21,7 +21,7 @@ from src.app.domain.models import (
 from src.app.domain.models.status import InputType, MissingCapability
 from src.app.normalization.canonical_builder import CanonicalBuilder
 from src.app.policies.export_policy import check_alto_export
-from src.app.serializers.alto_xml import serialize_alto
+from src.app.serializers.alto_xml import ALTO_NS, serialize_alto
 from src.app.validators.export_eligibility_validator import (
     compute_export_eligibility,
 )
@@ -176,8 +176,7 @@ class TestAltoReadiness:
         assert decision.allowed
 
         root = etree.fromstring(serialize_alto(doc))
-        ns = "{http://www.loc.gov/standards/alto/ns-v4#}"
-        strings = root.findall(f".//{ns}String")
+        strings = root.findall(f".//{{{ALTO_NS}}}String")
         assert len(strings) == 1
         assert strings[0].get("CONTENT") == "Hello world"
         assert strings[0].get("ID") == "tl1_str"  # compatibility, not w*

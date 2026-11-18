@@ -99,7 +99,7 @@ class WordBoxJsonAdapter(BaseAdapter):
 
             # Per-line word boxes ([l, t, r, b] → [x, y, w, h]) get the same
             # resize + clamp treatment as the line itself. Lines without word
-            # data fall back to one word spanning the line (see build loop).
+            # data take the line-level fallback (see build loop).
             line_words: list[dict] = []
             if words:
                 for wtext, (left, top, right, bottom) in words:

@@ -38,10 +38,10 @@ def _get_ocr(lang: str) -> Any:
     loads per instance.
 
     Scope of the guarantee: this only removes Paddle's own orientation/
-    unwarping transforms. The contract is verified by overlaying both
-    line polygons and word boxes on the exact image used for ALTO
-    presentation (ink-overlap check in the e2e run and the browser
-    viewer).
+    unwarping transforms. The contract is verified by
+    tests/e2e/test_coordinate_contract.py, which overlays both line
+    polygons and word boxes on the exact image used for ALTO presentation
+    (ink-overlap check on a locally supplied image + payload pair).
 
     `enable_mkldnn=False` works around a paddle 3.3 oneDNN/PIR bug
     (ConvertPirAttribute2RuntimeAttribute) that crashes PP-OCRv6 inference.

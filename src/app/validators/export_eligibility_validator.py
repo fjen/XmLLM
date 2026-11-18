@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from src.app.domain.models.readiness import ExportEligibility
-from src.app.domain.models.status import ReadinessLevel
+from src.app.domain.models.status import MissingCapability, ReadinessLevel
 from src.app.policies.document_policy import DocumentPolicy
 from src.app.validators.readiness_validator import (
     compute_page_alto_readiness,
@@ -38,9 +38,12 @@ def compute_export_eligibility(
 
     alto_levels: list[ReadinessLevel] = []
     page_levels: list[ReadinessLevel] = []
+    alto_missing: list[MissingCapability] = []
 
     for page in doc.pages:
-        alto_levels.append(compute_page_alto_readiness(page).level)
+        alto_readiness = compute_page_alto_readiness(page)
+        alto_levels.append(alto_readiness.level)
+        alto_missing.extend(alto_readiness.missing)
         page_levels.append(compute_page_pagexml_readiness(page).level)
 
     alto_export = _aggregate_levels(alto_levels)
@@ -66,6 +69,7 @@ def compute_export_eligibility(
         alto_export=alto_export,
         page_export=page_export,
         viewer_render=viewer_render,
+        alto_missing=alto_missing,
     )
 
 

@@ -49,8 +49,10 @@ class DocumentPolicy(BaseModel):
     require_lines_for_alto: bool = True
     """ALTO export requires at least line-level geometry."""
 
-    require_words_for_alto: bool = True
-    """ALTO export requires word-level text and geometry."""
+    require_words_for_alto: bool = False
+    """Refuse ALTO export when lines lack word-level data (line-level
+    fallback, ADR 0001). Default off: the compatibility <String> fallback
+    is allowed and the page's readiness flags the missing capability."""
 
     allow_partial_alto: bool = True
     """Allow ALTO export with partial readiness."""

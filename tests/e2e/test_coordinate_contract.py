@@ -90,7 +90,35 @@ def _on_ink(img: Image.Image, box: tuple[float, float, float, float]) -> bool:
     return _ink_ratio(img, box) > 0.02
 
 
+def _within_image(
+    img: Image.Image, box: tuple[float, float, float, float], slack: float = 2.0
+) -> bool:
+    x, y, w, h = box
+    return (
+        x >= -slack and y >= -slack
+        and x + w <= img.width + slack and y + h <= img.height + slack
+    )
+
+
 class TestCoordinateContract:
+    def test_payload_matches_image_extents(self, viewer: dict) -> None:
+        """Loud failure when the payload and image come from different
+        pages — a mismatched pair would otherwise surface as confusing
+        low-ink failures instead of 'fixture and image do not match'."""
+        img = Image.open(IMAGE_PATH)
+        boxes = (
+            [o["bbox"] for o in viewer["line_overlays"]]
+            + [o["bbox"] for o in viewer["word_overlays"]]
+        )
+        assert boxes, "projection has no geometry"
+        out_of_bounds = [b for b in boxes if not _within_image(img, b)]
+        # A small fraction of clipped boxes is normal (repair enricher);
+        # a mismatched pair puts nearly all boxes outside the image.
+        assert len(out_of_bounds) <= len(boxes) * 0.05, (
+            f"fixture and image do not match: {len(out_of_bounds)}/{len(boxes)}"
+            " boxes fall outside the image extents"
+        )
+
     def test_line_polygons_map_to_presented_image(self, viewer: dict) -> None:
         img = Image.open(IMAGE_PATH)
         assert viewer["line_overlays"], "no line overlays in projection"
@@ -102,6 +130,8 @@ class TestCoordinateContract:
         assert len(misses) <= len(viewer["line_overlays"]) * 0.05, misses[:10]
 
     def test_word_boxes_map_to_presented_image(self, viewer: dict) -> None:
+        # word_overlays contains only reconstructed words — fallback lines
+        # contribute no word geometry and are covered by the line check.
         img = Image.open(IMAGE_PATH)
         assert len(viewer["word_overlays"]) >= 100
         random.seed(7)

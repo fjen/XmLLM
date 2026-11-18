@@ -125,5 +125,7 @@ class TestViewerProjectionContract:
         r = client.get(f"/jobs/{completed_job}/viewer")
         assert r.status_code == 200
         data = r.json()
-        assert set(data["export_status"]) == {"alto_export", "page_export", "viewer_render"}
+        assert set(data["export_status"]) == {
+            "alto_export", "page_export", "viewer_render", "alto_missing",
+        }
         assert isinstance(data["validation_flags"], list)
