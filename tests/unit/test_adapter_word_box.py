@@ -295,3 +295,116 @@ class TestLanguageStamping:
         )
         for region in doc.pages[0].text_regions:
             assert region.lang is None
+
+
+class TestWordLevelPayload:
+    """Per-line word boxes — the optional third payload tuple element."""
+
+    @staticmethod
+    def _raw() -> RawProviderPayload:
+        payload = [
+            # Line with word boxes → one word per box
+            [
+                [[10, 10], [110, 10], [110, 40], [10, 40]],
+                (
+                    "Hello world",
+                    0.9,
+                    [["Hello", (10, 10, 50, 40)], ["world", (60, 10, 110, 40)]],
+                ),
+            ],
+            # Line without word data → fallback single word
+            [[[10, 60], [110, 60], [110, 90], [10, 90]], ("Second", 0.8)],
+        ]
+        return RawProviderPayload(
+            provider_id="paddleocr",
+            adapter_id="adapter.word_box_json.v1",
+            runtime_type="local",
+            payload=payload,
+            image_width=200,
+            image_height=120,
+        )
+
+    def test_word_boxes_become_words(
+        self, adapter: WordBoxJsonAdapter, geo_ctx: GeometryContext
+    ) -> None:
+        doc = adapter.normalize(self._raw(), geo_ctx, document_id="d")
+        lines = doc.pages[0].text_regions[0].lines
+        assert [w.text for w in lines[0].words] == ["Hello", "world"]
+        # Fallback line keeps a single word with the full line text
+        assert [w.text for w in lines[1].words] == ["Second"]
+
+    def test_word_boxes_converted_to_xywh(
+        self, adapter: WordBoxJsonAdapter, geo_ctx: GeometryContext
+    ) -> None:
+        doc = adapter.normalize(self._raw(), geo_ctx, document_id="d")
+        words = doc.pages[0].text_regions[0].lines[0].words
+        assert words[0].geometry.bbox == (10.0, 10.0, 40.0, 30.0)
+        assert words[1].geometry.bbox == (60.0, 10.0, 50.0, 30.0)
+
+    def test_word_provenance_is_derived(
+        self, adapter: WordBoxJsonAdapter, geo_ctx: GeometryContext
+    ) -> None:
+        doc = adapter.normalize(self._raw(), geo_ctx, document_id="d")
+        word = doc.pages[0].text_regions[0].lines[0].words[0]
+        assert word.provenance.evidence_type is EvidenceType.DERIVED
+        assert word.provenance.source_ref == "$[0].text_word"
+        # Fallback word keeps the line's native evidence
+        fallback = doc.pages[0].text_regions[0].lines[1].words[0]
+        assert fallback.provenance.evidence_type is EvidenceType.PROVIDER_NATIVE
+
+    def test_word_ids_are_unique(
+        self, adapter: WordBoxJsonAdapter, geo_ctx: GeometryContext
+    ) -> None:
+        doc = adapter.normalize(self._raw(), geo_ctx, document_id="d")
+        ids = [
+            w.id
+            for r in doc.pages[0].text_regions
+            for ln in r.lines
+            for w in ln.words
+        ]
+        assert ids == ["w1_1", "w1_2", "w2"]
+
+    def test_malformed_word_entry_raises(
+        self, adapter: WordBoxJsonAdapter, geo_ctx: GeometryContext
+    ) -> None:
+        payload = [
+            [
+                [[10, 10], [110, 10], [110, 40], [10, 40]],
+                ("Hello", 0.9, [["Hello", (1, 2, 3)]]),
+            ]
+        ]
+        raw = RawProviderPayload(
+            provider_id="paddleocr",
+            adapter_id="adapter.word_box_json.v1",
+            runtime_type="local",
+            payload=payload,
+            image_width=200,
+            image_height=120,
+        )
+        with pytest.raises(ValueError, match="word 0"):
+            adapter.normalize(raw, geo_ctx, document_id="d")
+
+    def test_ambiguous_line_falls_back_and_warns(
+        self, adapter: WordBoxJsonAdapter, geo_ctx: GeometryContext
+    ) -> None:
+        payload = [
+            # words=None + reason → line-level word retained, document flagged
+            [
+                [[10, 10], [110, 10], [110, 40], [10, 40]],
+                ("a b", 0.9, None, "word fragments do not align"),
+            ],
+        ]
+        raw = RawProviderPayload(
+            provider_id="paddleocr",
+            adapter_id="adapter.word_box_json.v1",
+            runtime_type="local",
+            payload=payload,
+            image_width=200,
+            image_height=120,
+        )
+        doc = adapter.normalize(raw, geo_ctx, document_id="d")
+        words = doc.pages[0].text_regions[0].lines[0].words
+        assert [w.text for w in words] == ["a b"]
+        assert doc.pages[0].warnings == [
+            "1 of 1 lines: word fragments do not align"
+        ]

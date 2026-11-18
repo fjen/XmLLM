@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -47,13 +48,100 @@ def _get_ocr(lang: str) -> Any:
         use_doc_orientation_classify=False,
         use_doc_unwarping=False,
         enable_mkldnn=False,
+        return_word_box=True,
     )
     return _ocr_instances[lang]
 
 
+def merge_paddle_words(
+    line_text: str,
+    fragments: list[tuple[str, list[Any]]],
+) -> list[tuple[str, tuple[float, float, float, float]]] | None:
+    """Reconstruct whitespace-delimited words from PaddleOCR fragments.
+
+    With ``return_word_box=True`` PaddleOCR emits one box per recognition
+    column, which splits linguistic words ('Universitätsbibliothek' →
+    'Universit'|'ä'|'tsbibliothek'). The line transcription is the
+    reference: fragments are matched to character spans in it, in order,
+    so repeated fragments bind to the right occurrence; word boundaries
+    come from the transcription's whitespace, never from geometric gaps.
+
+    Returns one (word_text, (left, top, right, bottom)) per whitespace-
+    delimited token, the box being the union of its member fragment boxes,
+    or None when the mapping is ambiguous:
+
+    - a fragment's text does not occur at the expected position in the
+      transcription (recognition drift, reordering, dropped characters),
+    - a fragment with non-whitespace content spans more than one word (its
+      box cannot be subdivided into measured per-word boxes),
+    - the fragments do not cover the whole transcription.
+
+    Whitespace-only fragments belong to no word (no ink) and are skipped.
+    On None the caller must keep the line-level data and flag the line —
+    no estimated word boundaries or coordinates. Line-end hyphenation
+    ('Kran-') stays its own token; fragments are never merged across
+    lines.
+    """
+    word_spans = [(m.start(), m.end()) for m in re.finditer(r"\S+", line_text)]
+    if not word_spans:
+        return None
+
+    # Sequential exact matching: each fragment must occur at or after the
+    # previous fragment's end, so repeated fragments map to the correct
+    # occurrence and any drift or reordering fails loudly.
+    frag_spans: list[tuple[int, int, list[Any]]] = []
+    cursor = 0
+    for text, box in fragments:
+        if not text:
+            continue
+        start = line_text.find(text, cursor)
+        if start < 0:
+            return None
+        end = start + len(text)
+        cursor = end
+        frag_spans.append((start, end, box))
+
+    if line_text[cursor:].strip():
+        return None  # fragments leave non-whitespace text uncovered
+
+    # A fragment shared by two words cannot yield measured per-word boxes.
+    # A fragment covering only whitespace belongs to no word (it has no
+    # ink) and is skipped — that is not an error. A non-whitespace fragment
+    # outside every word span, however, means the mapping is broken.
+    for f_start, f_end, _ in frag_spans:
+        overlapping = sum(1 for w_start, w_end in word_spans
+                          if f_start < w_end and f_end > w_start)
+        if overlapping > 1:
+            return None
+        if overlapping == 0 and line_text[f_start:f_end].strip():
+            return None
+
+    words: list[tuple[str, tuple[float, float, float, float]]] = []
+    for w_start, w_end in word_spans:
+        members = [box for f_start, f_end, box in frag_spans
+                   if f_start < w_end and f_end > w_start]
+        if not members:
+            return None
+        left = min(float(b[0]) for b in members)
+        top = min(float(b[1]) for b in members)
+        right = max(float(b[2]) for b in members)
+        bottom = max(float(b[3]) for b in members)
+        words.append((line_text[w_start:w_end], (left, top, right, bottom)))
+    return words
+
+
 def run_paddle_ocr(image_path: Path, lang: str) -> list[Any]:
     """Run PaddleOCR (3.x `predict`) and return the word_box_json payload:
-        [[4-point polygon, (text, confidence)], ...]
+        [[4-point polygon, (text, confidence[, words[, ambiguous_reason]])], ...]
+
+    With `return_word_box=True` each item's third element carries words
+    reconstructed from the line transcription (see merge_paddle_words) in
+    the same original-image pixel space as the line polygon. When a line's
+    fragments cannot be mapped to the transcription, the item carries
+    words=None plus an `ambiguous_reason` instead; the adapter keeps the
+    line-level word and adds a document warning. Items without word data
+    at all keep the two-element form (adapter falls back to one word per
+    line).
     """
     ocr = _get_ocr(lang)
     results = ocr.predict(str(image_path))
@@ -62,9 +150,41 @@ def run_paddle_ocr(image_path: Path, lang: str) -> list[Any]:
         polys = res["rec_polys"]
         texts = res["rec_texts"]
         scores = res["rec_scores"]
-        for poly, text, score in zip(polys, texts, scores, strict=True):
+        words = res.get("text_word")
+        word_boxes = res.get("text_word_boxes")
+        have_words = (
+            words is not None
+            and word_boxes is not None
+            and len(words) == len(polys)
+            and len(word_boxes) == len(polys)
+        )
+        for i, (poly, text, score) in enumerate(
+            zip(polys, texts, scores, strict=True)
+        ):
             points = [[float(x), float(y)] for x, y in poly]
-            payload.append([points, (str(text), float(score))])
+            line_text = str(text)
+            if have_words:
+                fragments = [
+                    (str(tok), box)
+                    for tok, box in zip(words[i], word_boxes[i], strict=True)
+                ]
+                merged = merge_paddle_words(line_text, fragments)
+                if merged is not None:
+                    payload.append([points, (line_text, float(score), merged)])
+                    continue
+                # Ambiguous mapping: retain the line-level data, flag it.
+                payload.append([
+                    points,
+                    (
+                        line_text,
+                        float(score),
+                        None,
+                        "word fragments do not align with the line "
+                        "transcription; word boundaries not derived",
+                    ),
+                ])
+                continue
+            payload.append([points, (line_text, float(score))])
     return payload
 
 

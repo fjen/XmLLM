@@ -20,9 +20,10 @@ class _FakePaddleOCR:
     def __init__(
         self, *, lang: str, use_textline_orientation: bool,
         use_doc_orientation_classify: bool, use_doc_unwarping: bool,
-        enable_mkldnn: bool,
+        enable_mkldnn: bool, return_word_box: bool,
     ) -> None:
         self.lang = lang
+        self.return_word_box = return_word_box
         _FakePaddleOCR.instances.append(self)
 
     def predict(self, image_path: str) -> list[dict[str, Any]]:
@@ -57,6 +58,8 @@ class TestRunPaddleOcrLang:
 
         assert len(_FakePaddleOCR.instances) == 1
         assert _FakePaddleOCR.instances[0].lang == "fr"
+        # Word-level boxes are requested for real word segmentation
+        assert _FakePaddleOCR.instances[0].return_word_box is True
         # Payload shape: [4-point polygon, (text, confidence)]
         assert results[0][0] == [[1.0, 1.0], [2.0, 1.0], [2.0, 2.0], [1.0, 2.0]]
         assert results[0][1] == ("word", 0.9)

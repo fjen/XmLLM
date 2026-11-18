@@ -6,9 +6,11 @@ PaddleOCR output format (standard):
         ...
     ]
 
-Each item is a detected text line/word with a 4-point polygon and
-a (text, confidence) tuple.  This adapter treats each item as a word
-within a single inferred text block.
+Each item is a detected text line with a 4-point polygon and
+a (text, confidence[, words]) tuple.  Each item becomes one line; when the
+engine supplies word-level boxes (the optional third tuple element) the
+line gets one word per word box, otherwise it gets a single word spanning
+the line.
 """
 
 from __future__ import annotations
@@ -80,7 +82,7 @@ class WordBoxJsonAdapter(BaseAdapter):
 
         for idx, item in enumerate(payload):
             points, text_conf = self._parse_item(item, idx)
-            text, confidence = self._parse_text_conf(text_conf, idx)
+            text, confidence, words, reason = self._parse_text_conf(text_conf, idx)
 
             bbox = four_point_to_xywh(points)
             polygon = four_point_to_polygon(points)
@@ -95,6 +97,21 @@ class WordBoxJsonAdapter(BaseAdapter):
             bbox = (max(0.0, bbox[0]), max(0.0, bbox[1]), bbox[2], bbox[3])
             polygon = [(max(0.0, x), max(0.0, y)) for x, y in polygon]
 
+            # Per-line word boxes ([l, t, r, b] → [x, y, w, h]) get the same
+            # resize + clamp treatment as the line itself. Lines without word
+            # data fall back to one word spanning the line (see build loop).
+            line_words: list[dict] = []
+            if words:
+                for wtext, (left, top, right, bottom) in words:
+                    if not wtext.strip():
+                        continue
+                    wb = (left, top, right - left, bottom - top)
+                    if geometry_context.resize_factor and geometry_context.resize_factor != 1.0:
+                        factor = 1.0 / geometry_context.resize_factor
+                        wb = (wb[0] * factor, wb[1] * factor, wb[2] * factor, wb[3] * factor)
+                    wb = (max(0.0, wb[0]), max(0.0, wb[1]), wb[2], wb[3])
+                    line_words.append({"text": wtext.strip(), "bbox": wb})
+
             word_bboxes.append(bbox)
             word_data.append({
                 "bbox": bbox,
@@ -102,6 +119,8 @@ class WordBoxJsonAdapter(BaseAdapter):
                 "text": text,
                 "confidence": confidence,
                 "source_idx": idx,
+                "words": line_words,
+                "ambiguous_reason": reason if not line_words else None,
             })
 
         if not word_data:
@@ -114,8 +133,8 @@ class WordBoxJsonAdapter(BaseAdapter):
             raw.metadata.get("language") if raw.metadata else None
         )
 
-        # Build a single inferred text block containing all items as words
-        # Each PaddleOCR item is treated as a line with one word
+        # Build a single inferred text block: each item becomes one line,
+        # with real word boxes when the engine supplies them (ADR 0001).
         block_bbox = union_all(word_bboxes)
         block_prov = Provenance(
             provider=raw.provider_id,
@@ -136,7 +155,6 @@ class WordBoxJsonAdapter(BaseAdapter):
         )
 
         for i, wd in enumerate(word_data):
-            word_id = f"w{i + 1}"
             line_id = f"tl{i + 1}"
 
             prov = Provenance(
@@ -152,15 +170,54 @@ class WordBoxJsonAdapter(BaseAdapter):
                 status=GeometryStatus.EXACT,
             )
 
-            # Each PaddleOCR detection becomes a line with one word
             line = region.add_line(line_id, geometry=geo, provenance=prov, lang=lang)
-            line.add_word(
-                word_id,
-                text=wd["text"],
-                geometry=geo,
-                provenance=prov,
-                confidence=wd["confidence"],
-                lang=lang,
+
+            if wd["words"]:
+                # Real word boxes from the engine. Each box is measured
+                # provider output (the union of that word's recognition
+                # columns), so geometry stays EXACT; the whitespace merge
+                # that grouped the engine's sub-word tokens into these
+                # words is recorded as derived evidence.
+                word_prov = Provenance(
+                    provider=raw.provider_id,
+                    adapter=self.version,
+                    source_ref=f"$[{wd['source_idx']}].text_word",
+                    evidence_type=EvidenceType.DERIVED,
+                    derived_from=[],
+                )
+                for j, w in enumerate(wd["words"]):
+                    line.add_word(
+                        f"w{i + 1}_{j + 1}",
+                        text=w["text"],
+                        geometry=Geometry(
+                            bbox=w["bbox"],
+                            polygon=None,
+                            status=GeometryStatus.EXACT,
+                        ),
+                        provenance=word_prov,
+                        confidence=wd["confidence"],
+                        lang=lang,
+                    )
+            else:
+                # Engine gave no word data: each detection becomes a line
+                # with one word spanning the whole line.
+                line.add_word(
+                    f"w{i + 1}",
+                    text=wd["text"],
+                    geometry=geo,
+                    provenance=prov,
+                    confidence=wd["confidence"],
+                    lang=lang,
+                )
+
+        # Lines whose word fragments could not be mapped to the transcription
+        # keep the line-level word (original data retained); flag the page
+        # once instead of once per line.
+        ambiguous = [wd for wd in word_data if wd["ambiguous_reason"]]
+        if ambiguous:
+            page.add_warning(
+                f"{len(ambiguous)} of {len(word_data)} lines: "
+                f"{ambiguous[0]['ambiguous_reason']}"
             )
 
         return builder.build()
@@ -184,19 +241,65 @@ class WordBoxJsonAdapter(BaseAdapter):
         return points, text_conf
 
     @staticmethod
-    def _parse_text_conf(text_conf: object, idx: int) -> tuple[str, float | None]:
-        """Extract (text, confidence) from the second element."""
-        if isinstance(text_conf, (list, tuple)) and len(text_conf) == 2:
+    def _parse_text_conf(
+        text_conf: object, idx: int
+    ) -> tuple[
+        str,
+        float | None,
+        list[tuple[str, tuple[float, float, float, float]]] | None,
+        str | None,
+    ]:
+        """Extract (text, confidence, words, ambiguous_reason).
+
+        `words` is the optional per-line word list carried by engines that
+        provide word-level boxes (PaddleOCR with return_word_box): a list of
+        [word_text, [left, top, right, bottom]]. `ambiguous_reason` is set
+        when the engine had word data but it could not be mapped to the line
+        transcription (words is None then) — the caller keeps the line-level
+        word and flags the line. Two-element tuples and bare strings have
+        neither (None, None) — the caller falls back to one word per line.
+        """
+        if isinstance(text_conf, (list, tuple)) and len(text_conf) in (2, 3, 4):
             text = str(text_conf[0])
             try:
                 confidence = float(text_conf[1])
                 confidence = max(0.0, min(1.0, confidence))
             except (TypeError, ValueError):
                 confidence = None
-            return text, confidence
+            words: list[tuple[str, tuple[float, float, float, float]]] | None = None
+            if len(text_conf) >= 3 and text_conf[2] is not None:
+                raw_words = text_conf[2]
+                if not isinstance(raw_words, (list, tuple)):
+                    raise ValueError(
+                        f"Item {idx}: expected word list, got {type(raw_words).__name__}"
+                    )
+                words = []
+                for j, entry in enumerate(raw_words):
+                    if (
+                        not isinstance(entry, (list, tuple))
+                        or len(entry) != 2
+                        or not isinstance(entry[1], (list, tuple))
+                        or len(entry[1]) != 4
+                    ):
+                        raise ValueError(
+                            f"Item {idx} word {j}: expected [text, [l, t, r, b]]"
+                        )
+                    try:
+                        box = tuple(float(v) for v in entry[1])
+                    except (TypeError, ValueError) as exc:
+                        raise ValueError(
+                            f"Item {idx} word {j}: non-numeric box"
+                        ) from exc
+                    words.append((str(entry[0]), box))
+                if not words:
+                    words = None
+            reason: str | None = None
+            if len(text_conf) == 4 and text_conf[3] is not None:
+                reason = str(text_conf[3])
+            return text, confidence, words, reason
         if isinstance(text_conf, str):
-            return text_conf, None
+            return text_conf, None, None, None
         raise ValueError(
-            f"Item {idx}: expected (text, confidence) or text string, "
-            f"got {type(text_conf).__name__}"
+            f"Item {idx}: expected (text, confidence[, words[, reason]]) or "
+            f"text string, got {type(text_conf).__name__}"
         )
