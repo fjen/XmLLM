@@ -54,6 +54,12 @@ Flags:
 | `--device` | auto | `gpu:0` pins the GPU. Unset, PaddleOCR auto-selects: GPU if the paddle build supports CUDA, else CPU |
 | `--max-upload-mb` | 50 | Upload size cap |
 
+Throughput tuning: set `OCR_RECOGNITION_BATCH_SIZE` (e.g. `16`) in the GPU box's
+`.env` to raise PaddleOCR's recognition batch size (pipeline default 6). Dense
+pages recognize in fewer passes; recognition memory grows with the value. The
+service reads it from the same settings as local inference, so it applies to
+the XmLLM machine's local mode too.
+
 On startup, the first request per language downloads models to `~/.paddlex` (about 2 minutes per language). Later requests are fast. Each configured language holds one model set in memory (at most 8, LRU).
 
 Check the log line on the first request: `PaddleOCR[fr]: CUDA build=True, device=gpu:0`. If it says `CUDA build=False`, the box has the CPU wheel and will run at CPU speed.

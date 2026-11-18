@@ -72,6 +72,11 @@ class Settings(BaseSettings):
     # PaddleOCR auto-selects: GPU if the paddle build supports CUDA, else
     # CPU. Note enable_mkldnn is CPU-only (oneDNN) and irrelevant on GPU.
     ocr_device: str | None = None
+    # Recognition batch size passed to PaddleOCR
+    # (text_recognition_batch_size). The pipeline default is 6; raising it
+    # (16–32) improves throughput on GPU at the cost of recognition
+    # memory. Unset = PaddleOCR default.
+    ocr_recognition_batch_size: int | None = Field(default=None, ge=1)
 
     # -- Geometry -------------------------------------------------------------
     bbox_containment_tolerance: int = 5
