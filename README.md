@@ -133,6 +133,12 @@ python scripts/batch_alto.py /path/to/book --lang en --out /path/to/alto
 - `--storage-root` overrides `STORAGE_ROOT` (default: `./data` or the `.env` value)
 - exit code 0 only if every image produced ALTO
 
+## Remote OCR (GPU offload)
+
+If local CPU inference is too slow, run PaddleOCR on a separate GPU server
+and point XmLLM at it with `OCR_SERVICE_URL`. Setup, version pinning,
+security and benchmarking: [docs/ocr-service.md](docs/ocr-service.md).
+
 ## API reference
 
 All endpoints are documented at `/docs` (Swagger UI) when the server is running.
