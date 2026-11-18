@@ -77,6 +77,12 @@ class Settings(BaseSettings):
     # (16–32) improves throughput on GPU at the cost of recognition
     # memory. Unset = PaddleOCR default.
     ocr_recognition_batch_size: int | None = Field(default=None, ge=1)
+    # Textline orientation classifier (per-line, runs ~once per detected
+    # line). Unset = True (current behaviour). Setting false skips ~200
+    # inferences per dense page — a large speedup on GPU — at the cost of
+    # misreading lines that are rotated relative to the page. Only turn
+    # off for scans known to be upright.
+    ocr_textline_orientation: bool | None = None
 
     # -- Geometry -------------------------------------------------------------
     bbox_containment_tolerance: int = 5

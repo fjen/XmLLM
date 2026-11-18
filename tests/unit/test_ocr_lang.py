@@ -24,6 +24,7 @@ def _pin_local_routing(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda: SimpleNamespace(
             ocr_service_url=None, ocr_device=None,
             ocr_recognition_batch_size=None,
+            ocr_textline_orientation=None,
         ),
     )
 
@@ -91,6 +92,7 @@ class TestRunPaddleOcrLang:
             lambda: SimpleNamespace(
                 ocr_device="gpu:0", ocr_service_url=None,
                 ocr_recognition_batch_size=None,
+                ocr_textline_orientation=None,
             ),
         )
         image = tmp_path / "page.tiff"

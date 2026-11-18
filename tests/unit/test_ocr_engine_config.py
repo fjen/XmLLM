@@ -44,6 +44,7 @@ def _patch_settings(
     *,
     device: str | None,
     rec_batch_size: int | None,
+    textline_orientation: bool | None = None,
 ) -> None:
     monkeypatch.setattr(
         ocr_module,
@@ -51,6 +52,7 @@ def _patch_settings(
         lambda: types.SimpleNamespace(
             ocr_device=device,
             ocr_recognition_batch_size=rec_batch_size,
+            ocr_textline_orientation=textline_orientation,
         ),
     )
 
@@ -90,6 +92,47 @@ class TestDevicePassthrough:
         ocr_module._get_ocr("en")
 
         assert captured["device"] == "gpu:0"
+
+
+class TestTextlineOrientation:
+    def test_false_reaches_engine(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured: dict[str, Any] = {}
+        _patch_engine(monkeypatch, captured)
+        _patch_settings(
+            monkeypatch, device=None, rec_batch_size=None,
+            textline_orientation=False,
+        )
+
+        ocr_module._get_ocr("en")
+
+        assert captured["use_textline_orientation"] is False
+
+    def test_true_reaches_engine(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured: dict[str, Any] = {}
+        _patch_engine(monkeypatch, captured)
+        _patch_settings(
+            monkeypatch, device=None, rec_batch_size=None,
+            textline_orientation=True,
+        )
+
+        ocr_module._get_ocr("en")
+
+        assert captured["use_textline_orientation"] is True
+
+    def test_unset_keeps_enabled_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured: dict[str, Any] = {}
+        _patch_engine(monkeypatch, captured)
+        _patch_settings(monkeypatch, device=None, rec_batch_size=None)
+
+        ocr_module._get_ocr("en")
+
+        assert captured["use_textline_orientation"] is True
 
     def test_instances_cached_per_lang(
         self, monkeypatch: pytest.MonkeyPatch

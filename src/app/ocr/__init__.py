@@ -71,6 +71,8 @@ def _get_ocr(lang: str) -> Any:
         kwargs["device"] = device
     if settings.ocr_recognition_batch_size is not None:
         kwargs["text_recognition_batch_size"] = settings.ocr_recognition_batch_size
+    if settings.ocr_textline_orientation is not None:
+        kwargs["use_textline_orientation"] = settings.ocr_textline_orientation
     _ocr_instances[lang] = PaddleOCR(**kwargs)
     logger.info(
         "PaddleOCR[%s]: CUDA build=%s, device=%s",
