@@ -14,6 +14,8 @@ from src.app.domain.models.geometry import GeometryContext
 from src.app.normalization.pipeline import normalize
 from src.app.serializers.alto_xml import ALTO_NS, serialize_alto
 
+from tests.helpers import with_word_boxes
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -24,7 +26,7 @@ class TestPaddleToAlto:
     def test_end_to_end(self, fixtures_dir: Path) -> None:
         # 1. Load raw PaddleOCR output
         with open(fixtures_dir / "paddle_ocr_sample.json") as f:
-            paddle_output = json.load(f)
+            paddle_output = with_word_boxes(json.load(f))
 
         raw = RawProviderPayload(
             provider_id="paddleocr",
@@ -63,7 +65,7 @@ class TestPaddleToAlto:
             for ln in r.lines
             for w in ln.words
         ]
-        assert len(all_words) == 5
+        assert len(all_words) == 12
 
         # Verify provenance chain. Reconstructed words carry bbox-only
         # geometry (the enclosing rectangle of their fragments); the
@@ -88,7 +90,7 @@ class TestPaddleToAlto:
 
         # Verify strings
         strings = root.findall(f".//{{{ALTO_NS}}}String")
-        assert len(strings) == 5
+        assert len(strings) == 12
 
         # First word content matches
         assert strings[0].get("CONTENT") == "Bonjour"
@@ -110,7 +112,7 @@ class TestPaddleToAlto:
     def test_canonical_json_roundtrip(self, fixtures_dir: Path) -> None:
         """The canonical doc produced by the pipeline survives JSON serialization."""
         with open(fixtures_dir / "paddle_ocr_sample.json") as f:
-            paddle_output = json.load(f)
+            paddle_output = with_word_boxes(json.load(f))
 
         raw = RawProviderPayload(
             provider_id="paddleocr",

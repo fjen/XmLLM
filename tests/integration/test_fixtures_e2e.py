@@ -27,6 +27,7 @@ from src.app.serializers.page_xml import PAGE_NS, serialize_page_xml
 from src.app.validators.export_eligibility_validator import compute_export_eligibility
 from src.app.validators.structural_validator import validate_structure
 from src.app.viewer.projection_builder import build_projection
+
 from tests.helpers import with_word_boxes
 
 if TYPE_CHECKING:
@@ -79,7 +80,7 @@ class TestSimplePage:
         assert len(doc.pages[0].text_regions) >= 1
         assert b"Bonjour" in alto
         assert b"Bonjour" in page
-        assert len(viewer["word_overlays"]) == 5
+        assert len(viewer["word_overlays"]) == 12
 
     def test_alto_valid_structure(self, fixtures_dir: Path) -> None:
         _, alto, _, _ = _run_paddle_pipeline("paddle_ocr_sample.json", fixtures_dir)
@@ -102,7 +103,7 @@ class TestDoubleColumn:
     def test_four_items(self, fixtures_dir: Path) -> None:
         doc, _, _, _ = _run_paddle_pipeline("double_column.json", fixtures_dir)
         words = [w for r in doc.pages[0].text_regions for ln in r.lines for w in ln.words]
-        assert len(words) == 4
+        assert len(words) == 16
 
     def test_reading_order_inferred(self, fixtures_dir: Path) -> None:
         doc, _, _, _ = _run_paddle_pipeline("double_column.json", fixtures_dir)
@@ -112,8 +113,8 @@ class TestDoubleColumn:
         _, alto, page, _ = _run_paddle_pipeline("double_column.json", fixtures_dir)
         alto_root = etree.fromstring(alto)
         page_root = etree.fromstring(page)
-        assert len(alto_root.findall(f".//{{{ALTO_NS}}}String")) == 4
-        assert len(page_root.findall(f".//{{{PAGE_NS}}}Word")) == 4
+        assert len(alto_root.findall(f".//{{{ALTO_NS}}}String")) == 16
+        assert len(page_root.findall(f".//{{{PAGE_NS}}}Word")) == 16
 
 
 # -- Noisy page --------------------------------------------------------------
@@ -144,7 +145,7 @@ class TestNoisyPage:
 
     def test_viewer_has_all_words(self, fixtures_dir: Path) -> None:
         _, _, _, viewer = _run_paddle_pipeline("noisy_page.json", fixtures_dir)
-        assert len(viewer["word_overlays"]) == 4
+        assert len(viewer["word_overlays"]) == 12
 
 
 # -- Title + body ------------------------------------------------------------
@@ -154,7 +155,7 @@ class TestTitleBody:
     def test_four_items(self, fixtures_dir: Path) -> None:
         doc, _, _, _ = _run_paddle_pipeline("title_body.json", fixtures_dir)
         words = [w for r in doc.pages[0].text_regions for ln in r.lines for w in ln.words]
-        assert len(words) == 4
+        assert len(words) == 21
 
     def test_alto_all_strings(self, fixtures_dir: Path) -> None:
         _, alto, _, _ = _run_paddle_pipeline("title_body.json", fixtures_dir)
@@ -166,7 +167,7 @@ class TestTitleBody:
         _, _, page, _ = _run_paddle_pipeline("title_body.json", fixtures_dir)
         root = etree.fromstring(page)
         words = root.findall(f".//{{{PAGE_NS}}}Word")
-        assert len(words) == 4
+        assert len(words) == 21
 
 
 # -- Hyphenation -------------------------------------------------------------

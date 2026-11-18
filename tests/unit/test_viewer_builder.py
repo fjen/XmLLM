@@ -36,6 +36,8 @@ from src.app.viewer.overlays import (
 )
 from src.app.viewer.projection_builder import build_all_projections, build_projection
 
+from tests.helpers import with_word_boxes
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -251,7 +253,7 @@ class TestProjectionFromPipeline:
 
     def test_from_paddle(self, fixtures_dir: Path) -> None:
         with open(fixtures_dir / "paddle_ocr_sample.json") as f:
-            payload = json.load(f)
+            payload = with_word_boxes(json.load(f))
 
         raw = RawProviderPayload(
             provider_id="paddleocr", adapter_id="v1", runtime_type="local",
@@ -264,6 +266,6 @@ class TestProjectionFromPipeline:
 
         vp = build_projection(doc)
         assert vp.image_ref == "page.png"
-        assert len(vp.word_overlays) == 5
+        assert len(vp.word_overlays) == 12
         assert vp.word_overlays[0].text == "Bonjour"
         assert len(vp.inspection_index) > 0
