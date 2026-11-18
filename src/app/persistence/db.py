@@ -117,6 +117,14 @@ class Database:
         ).fetchall()
         return [self._row_to_job(r) for r in rows]
 
+    def has_alto_for_source(self, source_filename: str) -> bool:
+        """True if any job for this source filename already produced ALTO."""
+        row = self.conn.execute(
+            "SELECT 1 FROM jobs WHERE source_filename = ? AND has_alto = 1 LIMIT 1",
+            (source_filename,),
+        ).fetchone()
+        return row is not None
+
     @staticmethod
     def _row_to_job(row: sqlite3.Row) -> Job:
         from datetime import datetime

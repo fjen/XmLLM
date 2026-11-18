@@ -21,6 +21,7 @@ Exit codes: 0 if every image produced ALTO; 1 if any file failed;
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -52,6 +53,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=None,
         help="Optional directory to copy each alto.xml into, named <image-stem>.xml.",
+    )
+    parser.add_argument(
+        "--no-skip-existing",
+        action="store_true",
+        help="Reprocess images whose ALTO output already exists (default: skip)."
+        " Without --out, an image counts as done when a prior job for the"
+        " same filename produced ALTO — files with identical names in"
+        " different directories are treated as the same image.",
     )
     parser.add_argument(
         "--storage-root",
@@ -166,12 +175,12 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(f"{len(images)} image(s), lang={args.lang}, storage={settings.storage_root}")
 
+        dest_names: dict[Path, str] = {}
         if args.out is not None:
             args.out.mkdir(parents=True, exist_ok=True)
             # Same stem from different formats/pages (e.g. page.tif +
             # page.jpg) must not abort the batch: disambiguate copy names.
             taken: set[str] = set()
-            dest_names: dict[Path, str] = {}
             for img in images:
                 name = f"{img.stem}.xml"
                 if name in taken:
@@ -185,7 +194,20 @@ def main(argv: list[str] | None = None) -> int:
                 dest_names[img] = name
 
         failures: list[tuple[str, str]] = []
+        skipped = 0
+        skip_existing = not args.no_skip_existing
         for tif in images:
+            if skip_existing:
+                dest_name = dest_names.get(tif)
+                already_done = (
+                    (args.out / dest_name).exists()
+                    if dest_name is not None
+                    else db.has_alto_for_source(tif.name)
+                )
+                if already_done:
+                    skipped += 1
+                    print(f"SKIP    {tif.name} (ALTO already exists)")
+                    continue
             try:
                 status, alto_path = process_image(tif, svc, store, args.lang)
             except Exception as exc:  # keep batch going on per-file errors
@@ -201,12 +223,20 @@ def main(argv: list[str] | None = None) -> int:
             print(f"OK      {tif.name} -> {alto_path} (status {status})")
             if args.out is not None:
                 dest = args.out / dest_names[tif]
-                shutil.copy2(alto_path, dest)
+                # Atomic copy: a Ctrl-C / OOM / disk-full mid-copy must never
+                # leave a truncated <stem>.xml — skip-existing would then
+                # silently skip it on every rerun.
+                part = dest.with_name(dest.name + ".part")
+                shutil.copy2(alto_path, part)
+                os.replace(part, dest)
                 print(f"        copied to {dest}")
     finally:
         db.close()
 
-    print(f"\ndone: {len(images) - len(failures)}/{len(images)} succeeded")
+    print(
+        f"\ndone: {len(images) - len(failures) - skipped}/{len(images)} succeeded,"
+        f" {skipped} skipped"
+    )
     return 1 if failures else 0
 
 

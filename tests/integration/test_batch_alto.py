@@ -7,6 +7,7 @@ job persistence) runs for real.
 
 from __future__ import annotations
 
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -252,3 +253,124 @@ class TestBatchEndToEnd:
         assert sorted(calls) == ["bad.tiff", "good.tiff"]  # batch continued
         jobs_dir = tmp_path / "storage" / "jobs"
         assert len(list(jobs_dir.iterdir())) == 1  # only the good one produced a job
+
+
+class TestSkipExisting:
+    def test_rerun_skips_processed_images_with_out(
+        self, stub_ocr: list[tuple[str, str]], tmp_path: Path
+    ) -> None:
+        book = tmp_path / "book"
+        book.mkdir()
+        _make_image(book / "page1.tiff")
+        argv = [
+            str(book), "--lang", "fr", "--out", str(tmp_path / "out"),
+            "--storage-root", str(tmp_path / "storage"),
+        ]
+
+        assert batch_alto.main(argv) == 0
+        assert len(stub_ocr) == 1
+        stub_ocr.clear()
+
+        # Rerun: dest XML exists → skipped, zero engine calls, still rc 0.
+        assert batch_alto.main(argv) == 0
+        assert stub_ocr == []
+        assert (tmp_path / "out" / "page1.xml").exists()
+
+    def test_no_skip_existing_reprocesses(
+        self, stub_ocr: list[tuple[str, str]], tmp_path: Path
+    ) -> None:
+        book = tmp_path / "book"
+        book.mkdir()
+        _make_image(book / "page1.tiff")
+        argv = [
+            str(book), "--lang", "fr", "--out", str(tmp_path / "out"),
+            "--storage-root", str(tmp_path / "storage"),
+        ]
+
+        assert batch_alto.main(argv) == 0
+        stub_ocr.clear()
+
+        assert batch_alto.main([*argv, "--no-skip-existing"]) == 0
+        assert len(stub_ocr) == 1  # reprocessed despite existing output
+
+    def test_rerun_skips_via_job_db_without_out(
+        self, stub_ocr: list[tuple[str, str]], tmp_path: Path
+    ) -> None:
+        book = tmp_path / "book"
+        book.mkdir()
+        _make_image(book / "page1.tiff")
+        argv = [str(book), "--lang", "fr", "--storage-root", str(tmp_path / "storage")]
+
+        assert batch_alto.main(argv) == 0
+        assert len(stub_ocr) == 1
+        stub_ocr.clear()
+
+        # No --out: a prior job for the same filename that produced ALTO
+        # counts as done (looked up in the job database).
+        assert batch_alto.main(argv) == 0
+        assert stub_ocr == []
+
+
+    def test_interrupted_copy_does_not_poison_skip(
+        self, stub_ocr: list[tuple[str, str]], tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A crash mid-copy must not leave a truncated dest that
+        skip-existing would silently skip forever."""
+        book = tmp_path / "book"
+        book.mkdir()
+        _make_image(book / "page1.tiff")
+        out = tmp_path / "out"
+        argv = [
+            str(book), "--lang", "fr", "--out", str(out),
+            "--storage-root", str(tmp_path / "storage"),
+        ]
+
+        class _SimulatedInterrupt(BaseException):
+            """Like KeyboardInterrupt (escapes `except Exception`) without
+            tripping pytest's own session-interrupt handling."""
+
+        real_copy2 = shutil.copy2  # same module object; capture before patch
+
+        def crashing_copy2(src: Path, dst: Path) -> None:
+            Path(dst).write_text("<alto>truncat", encoding="utf-8")
+            raise _SimulatedInterrupt  # simulated Ctrl-C mid-copy
+
+        monkeypatch.setattr(batch_alto.shutil, "copy2", crashing_copy2)
+        with pytest.raises(_SimulatedInterrupt):
+            batch_alto.main(argv)
+
+        # The dest was never completed; only the .part marker exists.
+        assert not (out / "page1.xml").exists()
+
+        # Rerun with the real copy: the partial state does not poison
+        # skip-existing — the image is processed and copied again.
+        monkeypatch.setattr(batch_alto.shutil, "copy2", real_copy2)
+        assert batch_alto.main(argv) == 0
+        assert len(stub_ocr) == 2  # reprocessed
+        assert (out / "page1.xml").exists()
+        root = etree.parse(str(out / "page1.xml")).getroot()
+        assert root.tag == "{http://www.loc.gov/standards/alto/ns-v4#}alto"
+        assert not list(out.glob("*.part"))  # no stale marker left
+
+
+class TestNoImageCopy:
+    def test_batch_job_dir_has_no_input_image(
+        self, stub_ocr: list[tuple[str, str]], tmp_path: Path
+    ) -> None:
+        book = tmp_path / "book"
+        book.mkdir()
+        _make_image(book / "page1.tiff")
+
+        rc = batch_alto.main(
+            [str(book), "--lang", "fr", "--storage-root", str(tmp_path / "storage")]
+        )
+
+        assert rc == 0
+        job_dir = next((tmp_path / "storage" / "jobs").iterdir())
+        artifacts = {p.name for p in job_dir.iterdir()}
+        assert artifacts == {
+            "raw_payload.json", "canonical.json", "alto.xml",
+            "page.xml", "viewer.json", "events.json",
+        }
+        assert not any(p.stem == "input" for p in job_dir.iterdir())
