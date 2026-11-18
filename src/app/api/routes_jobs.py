@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, UploadFile
 
 from src.app.api import get_file_store, get_job_service
 from src.app.domain.models import RawProviderPayload
+from src.app.settings import get_settings
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -29,11 +30,14 @@ async def create_job(
     """
     svc = get_job_service()
 
-    # Read raw payload (limit to 50 MB to prevent DoS)
-    max_size = 52_428_800
+    # Read raw payload (cap from settings to prevent DoS)
+    max_size = get_settings().max_upload_size
     content = await raw_payload_file.read(max_size + 1)
     if len(content) > max_size:
-        raise HTTPException(status_code=413, detail="Payload too large (max 50 MB)")
+        raise HTTPException(
+            status_code=413,
+            detail=f"Payload too large (max {max_size // (1024 * 1024)} MB)",
+        )
     try:
         payload_data = json.loads(content)
     except json.JSONDecodeError as e:

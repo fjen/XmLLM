@@ -25,6 +25,7 @@ from src.app.domain.models import (
     Provenance,
     RawProviderPayload,
 )
+from src.app.domain.models.lang import normalize_iso_lang
 from src.app.domain.models.status import EvidenceType, GeometryStatus, InputType
 from src.app.geometry.bbox import union_all
 from src.app.geometry.normalization import xyxy_to_xywh
@@ -122,10 +123,17 @@ class LineBoxJsonAdapter(BaseAdapter):
             derived_from=[f"tl{i+1}" for i in range(len(line_data))],
         )
 
+        # Optional caller-declared language (NOT provider-detected) via
+        # payload metadata (ISO 639-3). Anything invalid is silently ignored.
+        lang = normalize_iso_lang(
+            raw.metadata.get("language") if raw.metadata else None
+        )
+
         region = page.add_text_region(
             region_id="tb1",
             geometry=Geometry(bbox=block_bbox, status=GeometryStatus.INFERRED),
             provenance=block_prov,
+            lang=lang,
         )
 
         for i, ld in enumerate(line_data):
@@ -141,13 +149,14 @@ class LineBoxJsonAdapter(BaseAdapter):
 
             geo = Geometry(bbox=ld["bbox"], status=GeometryStatus.EXACT)
 
-            line = region.add_line(line_id, geometry=geo, provenance=prov)
+            line = region.add_line(line_id, geometry=geo, provenance=prov, lang=lang)
             line.add_word(
                 word_id,
                 text=ld["text"],
                 geometry=geo,
                 provenance=prov,
                 confidence=ld["confidence"],
+                lang=lang,
             )
 
         return builder.build()

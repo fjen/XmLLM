@@ -113,6 +113,26 @@ STORAGE_ROOT=/data
 
 The application auto-detects Space mode via the `SPACE_ID` environment variable.
 
+### Batch (no server)
+
+Generate ALTO XML for a directory (or several) of scanned images
+(TIFF, JPEG, PNG, WebP, BMP) without running the HTTP API — the pipeline
+executes in-process and each file becomes a normal persisted job under
+`STORAGE_ROOT/jobs/<job_id>/`:
+
+```bash
+python scripts/batch_alto.py /path/to/book1 /path/to/book2 --lang fr
+python scripts/batch_alto.py /path/to/book --lang en --out /path/to/alto
+```
+
+- `--lang` sets the PaddleOCR language code (default: `en`); it must be one of
+  the supported codes (`en`, `fr`, `de`, `ch`, `japan`, …). It is also mapped
+  to ISO 639-3 and stamped onto canonical nodes, so ALTO output carries
+  `LANG` attributes (e.g. `fr` → `LANG="fra"`)
+- `--out` optionally copies each `alto.xml` as `<image-stem>.xml`
+- `--storage-root` overrides `STORAGE_ROOT` (default: `./data` or the `.env` value)
+- exit code 0 only if every image produced ALTO
+
 ## API reference
 
 All endpoints are documented at `/docs` (Swagger UI) when the server is running.
@@ -122,6 +142,12 @@ All endpoints are documented at `/docs` (Swagger UI) when the server is running.
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/health` | Status, version, execution mode |
+
+### OCR
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/ocr` | Upload an image, run PaddleOCR, produce ALTO/PAGE XML. `lang` query param selects the PaddleOCR language (default `fr`; see supported codes in `src/app/ocr/__init__.py`) |
 
 ### Providers
 

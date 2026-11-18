@@ -17,6 +17,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.app.domain.models.geometry import Geometry
+from src.app.domain.models.lang import ISO_LANG_PATTERN
 from src.app.domain.models.provenance import Provenance
 from src.app.domain.models.readiness import (
     AltoReadiness,
@@ -89,7 +90,7 @@ class Word(BaseModel):
     text: str = Field(min_length=1)
     normalized_text: str | None = None
     geometry: Geometry
-    lang: str | None = Field(default=None, pattern=r"^[a-z]{3}$")
+    lang: str | None = Field(default=None, pattern=ISO_LANG_PATTERN.pattern)
     confidence: float | None = Field(default=None, ge=0, le=1)
     style_refs: list[str] = Field(default_factory=list)
     hyphenation: Hyphenation | None = None
@@ -111,7 +112,7 @@ class TextLine(BaseModel):
     id: str = Field(min_length=1)
     geometry: Geometry
     confidence: float | None = Field(default=None, ge=0, le=1)
-    lang: str | None = Field(default=None, pattern=r"^[a-z]{3}$")
+    lang: str | None = Field(default=None, pattern=ISO_LANG_PATTERN.pattern)
     provenance: Provenance
     words: list[Word] = Field(min_length=1)
     metadata: dict[str, Any] | None = None
@@ -137,7 +138,7 @@ class TextRegion(BaseModel):
     role: BlockRole | None = None
     geometry: Geometry
     confidence: float | None = Field(default=None, ge=0, le=1)
-    lang: str | None = Field(default=None, pattern=r"^[a-z]{3}$")
+    lang: str | None = Field(default=None, pattern=ISO_LANG_PATTERN.pattern)
     provenance: Provenance
     lines: list[TextLine] = Field(min_length=1)
     metadata: dict[str, Any] | None = None

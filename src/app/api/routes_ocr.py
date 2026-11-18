@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import os
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -10,44 +12,105 @@ from fastapi import APIRouter, HTTPException, UploadFile
 
 from src.app.api import get_job_service
 from src.app.domain.models import RawProviderPayload
+from src.app.ocr import SUPPORTED_IMAGE_EXTENSIONS, SUPPORTED_PADDLE_LANGS
+from src.app.settings import get_settings
 
 router = APIRouter(tags=["ocr"])
 
-ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tiff", ".tif", ".webp", ".bmp"}
-MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20 MB
+logger = logging.getLogger(__name__)
 
 
 @router.post("/ocr", status_code=201)
-async def ocr_image(image: UploadFile) -> dict[str, Any]:
+async def ocr_image(image: UploadFile, lang: str = "fr") -> dict[str, Any]:
     """Upload an image, run PaddleOCR, and produce ALTO/PAGE XML.
 
     This is the main user-facing endpoint — no JSON payload needed.
+    `lang` (default: "fr") is the PaddleOCR language code (e.g. en, fr, de,
+    ch); it also stamps the ISO 639-3 language onto the canonical document
+    and the ALTO LANG attributes.
     """
+    lang = lang.strip().lower()
+    if lang not in SUPPORTED_PADDLE_LANGS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported lang '{lang}'. Supported: "
+            f"{', '.join(sorted(SUPPORTED_PADDLE_LANGS))}",
+        )
+
     if not image.filename:
         raise HTTPException(status_code=422, detail="No filename provided")
 
     ext = Path(image.filename).suffix.lower()
-    if ext not in ALLOWED_EXTENSIONS:
+    if ext not in SUPPORTED_IMAGE_EXTENSIONS:
         raise HTTPException(
             status_code=422,
-            detail=f"Unsupported format '{ext}'. Use: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
+            detail=f"Unsupported format '{ext}'. Use: "
+            f"{', '.join(sorted(SUPPORTED_IMAGE_EXTENSIONS))}",
         )
 
-    content = await image.read(MAX_IMAGE_SIZE + 1)
-    if len(content) > MAX_IMAGE_SIZE:
-        raise HTTPException(status_code=413, detail="Image too large (max 20 MB)")
+    settings = get_settings()
+    content = await image.read(settings.max_ocr_image_size + 1)
+    if len(content) > settings.max_ocr_image_size:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Image too large (max {settings.max_ocr_image_size // (1024 * 1024)} MB)",
+        )
 
-    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
-        tmp.write(content)
-        tmp_path = Path(tmp.name)
+    fd, tmp_name = tempfile.mkstemp(suffix=ext)
+    os.close(fd)
+    tmp_path = Path(tmp_name)
 
     try:
-        from PIL import Image as PILImage
-        with PILImage.open(tmp_path) as img:
-            image_width, image_height = img.size
+        tmp_path.write_bytes(content)
 
-        from src.app.ocr import paddle_result_to_payload, run_paddle_ocr
-        results = run_paddle_ocr(tmp_path)
+        from PIL import Image as PILImage
+        try:
+            with PILImage.open(tmp_path) as img:
+                image_width, image_height = img.size
+        except PILImage.DecompressionBombError as exc:
+            # Pillow's own guard (~179 MP default) — treat as oversize
+            raise HTTPException(
+                status_code=413,
+                detail="Image dimensions too large",
+            ) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unreadable image: {type(exc).__name__}",
+            ) from exc
+        if image_width * image_height > settings.max_ocr_image_pixels:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Image dimensions too large "
+                f"(max {settings.max_ocr_image_pixels // 1_000_000} megapixels)",
+            )
+
+        from src.app.ocr import (
+            paddle_lang_to_iso639_3,
+            paddle_result_to_payload,
+            run_paddle_ocr,
+        )
+        try:
+            results = run_paddle_ocr(tmp_path, lang=lang)
+        except (ValueError, AssertionError, SystemExit) as exc:
+            # How paddleocr 2.x signals an unusable lang/config:
+            # parse_lang ends in a bare `assert` → AssertionError (stripped
+            # under python -O, after which get_model_config calls
+            # sys.exit(-1) → SystemExit). Log server-side, return no
+            # internals. The allowlist gate above is the primary defense.
+            logger.exception("PaddleOCR rejected lang=%s", lang)
+            raise HTTPException(
+                status_code=422,
+                detail=f"PaddleOCR failed for lang '{lang}' "
+                f"({type(exc).__name__})",
+            ) from exc
+        except HTTPException:
+            raise
+        except Exception:
+            # Engine/infra failure (network, disk, OOM) — server error,
+            # full detail in logs only.
+            logger.exception("PaddleOCR failed for lang=%s", lang)
+            raise
 
         if not results:
             raise HTTPException(
@@ -57,6 +120,7 @@ async def ocr_image(image: UploadFile) -> dict[str, Any]:
 
         payload = paddle_result_to_payload(results)
 
+        iso_lang = paddle_lang_to_iso639_3(lang)
         raw = RawProviderPayload(
             provider_id="paddleocr",
             adapter_id="adapter.word_box_json.v1",
@@ -64,6 +128,7 @@ async def ocr_image(image: UploadFile) -> dict[str, Any]:
             payload=payload,
             image_width=image_width,
             image_height=image_height,
+            metadata={"language": iso_lang} if iso_lang else None,
         )
 
         svc = get_job_service()

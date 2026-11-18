@@ -58,14 +58,14 @@ class FileStore:
 
     def save_json(self, job_id: str, filename: str, data: Any) -> Path:
         """Save a JSON-serializable object."""
-        dest = self.job_dir(job_id) / filename
+        dest = self.job_dir(job_id) / self._sanitize_id(filename)
         content = json.dumps(data, ensure_ascii=False, indent=2, default=str)
         dest.write_text(content, encoding="utf-8")
         return dest
 
     def save_bytes(self, job_id: str, filename: str, data: bytes) -> Path:
         """Save raw bytes (e.g. XML)."""
-        dest = self.job_dir(job_id) / filename
+        dest = self.job_dir(job_id) / self._sanitize_id(filename)
         dest.write_bytes(data)
         return dest
 
@@ -91,14 +91,14 @@ class FileStore:
 
     def load_json(self, job_id: str, filename: str) -> Any:
         """Load a JSON file from the job directory. Returns None if not found."""
-        path = self._jobs_dir / self._sanitize_id(job_id) / filename
+        path = self._jobs_dir / self._sanitize_id(job_id) / self._sanitize_id(filename)
         if not path.exists():
             return None
         return json.loads(path.read_text(encoding="utf-8"))
 
     def load_bytes(self, job_id: str, filename: str) -> bytes | None:
         """Load raw bytes. Returns None if not found."""
-        path = self._jobs_dir / self._sanitize_id(job_id) / filename
+        path = self._jobs_dir / self._sanitize_id(job_id) / self._sanitize_id(filename)
         if not path.exists():
             return None
         return path.read_bytes()
@@ -125,12 +125,13 @@ class FileStore:
 
     def get_input_image_path(self, job_id: str) -> Path | None:
         """Find the input image for a job (any extension)."""
-        d = self._jobs_dir / job_id
+        from src.app.ocr import SUPPORTED_IMAGE_EXTENSIONS
+
+        d = self._jobs_dir / self._sanitize_id(job_id)
         if not d.exists():
             return None
         for f in d.iterdir():
-            valid = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".webp")
-            if f.stem == "input" and f.suffix in valid:
+            if f.stem == "input" and f.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS:
                 return f
         return None
 
@@ -171,7 +172,9 @@ class FileStore:
         )
 
     def job_exists(self, job_id: str) -> bool:
-        return (self._jobs_dir / job_id).exists()
+        return (self._jobs_dir / self._sanitize_id(job_id)).exists()
 
     def job_has_artifact(self, job_id: str, filename: str) -> bool:
-        return (self._jobs_dir / job_id / filename).exists()
+        return (
+            self._jobs_dir / self._sanitize_id(job_id) / self._sanitize_id(filename)
+        ).exists()

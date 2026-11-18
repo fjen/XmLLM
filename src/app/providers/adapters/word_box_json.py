@@ -21,6 +21,7 @@ from src.app.domain.models import (
     Provenance,
     RawProviderPayload,
 )
+from src.app.domain.models.lang import normalize_iso_lang
 from src.app.domain.models.status import (
     EvidenceType,
     GeometryStatus,
@@ -106,6 +107,13 @@ class WordBoxJsonAdapter(BaseAdapter):
         if not word_data:
             raise ValueError("word_box_json payload contains no items")
 
+        # Optional caller-declared language (NOT provider-detected) via
+        # payload metadata (ISO 639-3, e.g. from paddle_lang_to_iso639_3).
+        # Anything invalid is silently ignored.
+        lang = normalize_iso_lang(
+            raw.metadata.get("language") if raw.metadata else None
+        )
+
         # Build a single inferred text block containing all items as words
         # Each PaddleOCR item is treated as a line with one word
         block_bbox = union_all(word_bboxes)
@@ -124,6 +132,7 @@ class WordBoxJsonAdapter(BaseAdapter):
                 status=GeometryStatus.INFERRED,
             ),
             provenance=block_prov,
+            lang=lang,
         )
 
         for i, wd in enumerate(word_data):
@@ -144,13 +153,14 @@ class WordBoxJsonAdapter(BaseAdapter):
             )
 
             # Each PaddleOCR detection becomes a line with one word
-            line = region.add_line(line_id, geometry=geo, provenance=prov)
+            line = region.add_line(line_id, geometry=geo, provenance=prov, lang=lang)
             line.add_word(
                 word_id,
                 text=wd["text"],
                 geometry=geo,
                 provenance=prov,
                 confidence=wd["confidence"],
+                lang=lang,
             )
 
         return builder.build()

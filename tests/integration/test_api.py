@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from fastapi.testclient import TestClient
+from lxml import etree
 from src.app.main import app
 
 if TYPE_CHECKING:
@@ -279,3 +280,166 @@ class TestViewer:
     def test_viewer_nonexistent(self, client: TestClient) -> None:
         r = client.get("/jobs/nonexistent/viewer")
         assert r.status_code == 404
+
+
+# -- OCR (image upload) --------------------------------------------------------
+
+
+class TestOcr:
+    """POST /ocr — image upload with the `lang` query parameter."""
+
+    @staticmethod
+    def _png_bytes() -> bytes:
+        from PIL import Image
+
+        buf = io.BytesIO()
+        Image.new("RGB", (200, 100), "white").save(buf, format="PNG")
+        return buf.getvalue()
+
+    @pytest.fixture
+    def stub_ocr(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Stub the PaddleOCR engine call; everything downstream is real."""
+
+        def fake_run_paddle_ocr(image_path: Path, lang: str) -> list:
+            return [[[[10, 10], [110, 10], [110, 40], [10, 40]], ("Bonjour", 0.98)]]
+
+        monkeypatch.setattr("src.app.ocr.run_paddle_ocr", fake_run_paddle_ocr)
+
+    def test_default_lang_is_fra(self, client: TestClient, stub_ocr: None) -> None:
+        r = client.post(
+            "/ocr",
+            files={"image": ("page.png", self._png_bytes(), "image/png")},
+        )
+        assert r.status_code == 201
+        job_id = r.json()["job_id"]
+
+        alto = client.get(f"/jobs/{job_id}/alto")
+        assert alto.status_code == 200
+        root = etree.fromstring(alto.content)
+        for s in root.findall(".//{*}String"):
+            assert s.get("LANG") == "fra"
+
+    def test_lang_param_stamps_iso639_3(
+        self, client: TestClient, stub_ocr: None
+    ) -> None:
+        r = client.post(
+            "/ocr?lang=de",
+            files={"image": ("page.png", self._png_bytes(), "image/png")},
+        )
+        assert r.status_code == 201
+        job_id = r.json()["job_id"]
+
+        alto = client.get(f"/jobs/{job_id}/alto")
+        assert alto.status_code == 200
+        root = etree.fromstring(alto.content)
+        for s in root.findall(".//{*}String"):
+            assert s.get("LANG") == "deu"
+
+    def test_empty_lang_rejected(self, client: TestClient, stub_ocr: None) -> None:
+        r = client.post(
+            "/ocr?lang=%20",
+            files={"image": ("page.png", self._png_bytes(), "image/png")},
+        )
+        assert r.status_code == 422
+        assert "lang" in r.json()["detail"]
+
+    def test_invalid_shape_lang_rejected(
+        self, client: TestClient, stub_ocr: None
+    ) -> None:
+        r = client.post(
+            "/ocr?lang=f%C3%A0r",
+            files={"image": ("page.png", self._png_bytes(), "image/png")},
+        )
+        assert r.status_code == 422
+        assert "Unsupported lang" in r.json()["detail"]
+
+    def test_unsupported_lang_rejected(
+        self, client: TestClient, stub_ocr: None
+    ) -> None:
+        r = client.post(
+            "/ocr?lang=xyz",
+            files={"image": ("page.png", self._png_bytes(), "image/png")},
+        )
+        assert r.status_code == 422
+        assert "Unsupported lang 'xyz'" in r.json()["detail"]
+
+    def test_iso_code_rejected_in_favor_of_paddle_code(
+        self, client: TestClient, stub_ocr: None
+    ) -> None:
+        r = client.post(
+            "/ocr?lang=fra",
+            files={"image": ("page.png", self._png_bytes(), "image/png")},
+        )
+        assert r.status_code == 422
+        assert "Unsupported lang 'fra'" in r.json()["detail"]
+
+    @pytest.mark.parametrize(
+        ("exc_type", "label"),
+        [
+            (AssertionError, "AssertionError"),  # parse_lang's bare assert (2.x)
+            (ValueError, "ValueError"),
+            (SystemExit, "SystemExit"),  # get_model_config's sys.exit(-1)
+        ],
+    )
+    def test_engine_lang_rejection_returns_422(
+        self,
+        client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+        exc_type: type[BaseException],
+        label: str,
+    ) -> None:
+        def bad_lang(image_path: Path, lang: str) -> list:
+            raise exc_type(f"param lang must in [...] ({label})")
+
+        monkeypatch.setattr("src.app.ocr.run_paddle_ocr", bad_lang)
+        r = client.post(
+            "/ocr?lang=de",
+            files={"image": ("page.png", self._png_bytes(), "image/png")},
+        )
+        assert r.status_code == 422
+        assert f"PaddleOCR failed for lang 'de' ({label})" in r.json()["detail"]
+        # No raw exception text leaks to the client
+        assert "must in" not in r.json()["detail"]
+
+    def test_engine_infra_failure_returns_500(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def boom(image_path: Path, lang: str) -> list:
+            raise RuntimeError("disk full while downloading models")
+
+        monkeypatch.setattr("src.app.ocr.run_paddle_ocr", boom)
+        with pytest.raises(RuntimeError, match="disk full"):
+            client.post(
+                "/ocr?lang=de",
+                files={"image": ("page.png", self._png_bytes(), "image/png")},
+            )
+
+    def test_corrupt_image_returns_422(
+        self, client: TestClient, stub_ocr: None
+    ) -> None:
+        r = client.post(
+            "/ocr",
+            files={"image": ("page.png", b"this is not a png", "image/png")},
+        )
+        assert r.status_code == 422
+        assert "Unreadable image" in r.json()["detail"]
+
+    def test_oversized_dimensions_rejected(
+        self,
+        client: TestClient,
+        stub_ocr: None,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        from src.app.settings import Settings
+
+        monkeypatch.setattr(
+            "src.app.api.routes_ocr.get_settings",
+            lambda: Settings(storage_root=tmp_path / "data", max_ocr_image_pixels=1000),
+        )
+        r = client.post(
+            "/ocr",
+            files={"image": ("page.png", self._png_bytes(), "image/png")},  # 20k px
+        )
+        assert r.status_code == 413
+        assert "megapixels" in r.json()["detail"]

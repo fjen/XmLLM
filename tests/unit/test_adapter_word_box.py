@@ -229,3 +229,69 @@ class TestWordBoxJsonAdapter:
 
         doc2 = CanonicalDocument.model_validate(data)
         assert doc2.document_id == doc.document_id
+
+
+class TestLanguageStamping:
+    """Caller-declared language (raw.metadata['language'], ISO 639-3)."""
+
+    def _normalize(
+        self,
+        adapter: WordBoxJsonAdapter,
+        paddle_payload: list,
+        geo_ctx: GeometryContext,
+        metadata: dict | None,
+    ):
+        raw = RawProviderPayload(
+            provider_id="paddleocr",
+            adapter_id="adapter.word_box_json.v1",
+            runtime_type="local",
+            payload=paddle_payload,
+            image_width=2480,
+            image_height=3508,
+            metadata=metadata,
+        )
+        return adapter.normalize(raw, geo_ctx, document_id="test_doc")
+
+    def test_lang_stamped_on_all_levels(
+        self,
+        adapter: WordBoxJsonAdapter,
+        paddle_payload: list,
+        geo_ctx: GeometryContext,
+    ) -> None:
+        doc = self._normalize(adapter, paddle_payload, geo_ctx, {"language": "fra"})
+        for region in doc.pages[0].text_regions:
+            assert region.lang == "fra"
+            for line in region.lines:
+                assert line.lang == "fra"
+                for word in line.words:
+                    assert word.lang == "fra"
+
+    def test_no_metadata_keeps_lang_none(
+        self,
+        adapter: WordBoxJsonAdapter,
+        paddle_payload: list,
+        geo_ctx: GeometryContext,
+    ) -> None:
+        doc = self._normalize(adapter, paddle_payload, geo_ctx, None)
+        for region in doc.pages[0].text_regions:
+            assert region.lang is None
+            for line in region.lines:
+                for word in line.words:
+                    assert word.lang is None
+
+    @pytest.mark.parametrize(
+        "bad_lang",
+        ["fraa", "FR", "fr1", "fr", "fàr", "éèê", 123, None, ["fra"]],
+    )
+    def test_invalid_lang_ignored(
+        self,
+        adapter: WordBoxJsonAdapter,
+        paddle_payload: list,
+        geo_ctx: GeometryContext,
+        bad_lang: object,
+    ) -> None:
+        doc = self._normalize(
+            adapter, paddle_payload, geo_ctx, {"language": bad_lang}
+        )
+        for region in doc.pages[0].text_regions:
+            assert region.lang is None
