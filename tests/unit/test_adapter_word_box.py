@@ -460,6 +460,7 @@ class TestWordLevelPayload:
         line = doc.pages[0].text_regions[0].lines[0]
         x, y, w, h = line.geometry.bbox
         assert (x, y, w, h) == (10.0, 30.0, 100.0, 1.0)
+        assert line.geometry.status == GeometryStatus.REPAIRED
 
     def test_degenerate_word_bbox_clamped(
         self, adapter: WordBoxJsonAdapter, geo_ctx: GeometryContext
@@ -482,6 +483,35 @@ class TestWordLevelPayload:
         word = doc.pages[0].text_regions[0].lines[0].words[0]
         x, y, w, h = word.geometry.bbox
         assert (x, y, w, h) == (10.0, 25.0, 45.0, 1.0)
+        assert word.geometry.status == GeometryStatus.REPAIRED
+
+    def test_negative_word_extent_clamped_and_warned(
+        self, adapter: WordBoxJsonAdapter, geo_ctx: GeometryContext
+    ) -> None:
+        """A word box with right < left is corrupt data, not a flat
+        polygon: clamped, marked REPAIRED, recorded as a page warning.
+        Line polygons cannot be negative (min/max envelope)."""
+        payload = [
+            [
+                [[10, 10], [110, 10], [110, 40], [10, 40]],
+                ("Bad", 0.9, [["Bad", (50, 10, 20, 40)]]),
+            ]
+        ]
+        raw = RawProviderPayload(
+            provider_id="paddleocr",
+            adapter_id="adapter.word_box_json.v1",
+            runtime_type="local",
+            payload=payload,
+            image_width=200,
+            image_height=120,
+        )
+        doc = adapter.normalize(raw, geo_ctx, document_id="d")
+        line = doc.pages[0].text_regions[0].lines[0]
+        assert line.geometry.status == GeometryStatus.EXACT
+        word = line.words[0]
+        assert word.geometry.bbox[2] == 1.0
+        assert word.geometry.status == GeometryStatus.REPAIRED
+        assert "1 boxes repaired: negative extent clamped" in doc.pages[0].warnings
 
     def test_ambiguous_line_falls_back_and_warns(
         self, adapter: WordBoxJsonAdapter, geo_ctx: GeometryContext

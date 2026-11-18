@@ -31,6 +31,7 @@ from src.app.domain.models.status import (
 )
 from src.app.geometry.bbox import union_all
 from src.app.geometry.normalization import four_point_to_polygon, four_point_to_xywh
+from src.app.geometry.transforms import clamp_degenerate
 from src.app.normalization.canonical_builder import CanonicalBuilder
 from src.app.providers.adapters.base import BaseAdapter
 
@@ -79,6 +80,7 @@ class WordBoxJsonAdapter(BaseAdapter):
         # Collect all word bboxes for building a block-level bbox
         word_bboxes: list[tuple[float, float, float, float]] = []
         word_data: list[dict] = []
+        negative_extents = 0
 
         skipped_empty = 0
         for idx, item in enumerate(payload):
@@ -104,10 +106,11 @@ class WordBoxJsonAdapter(BaseAdapter):
             bbox = (max(0.0, bbox[0]), max(0.0, bbox[1]), bbox[2], bbox[3])
             polygon = [(max(0.0, x), max(0.0, y)) for x, y in polygon]
 
-            # Degenerate boxes: a perfectly horizontal or vertical detection
-            # polygon measures zero in one dimension (real OCR data). The
-            # smallest honest box occupies one pixel in that dimension.
-            bbox = (bbox[0], bbox[1], max(bbox[2], 1.0), max(bbox[3], 1.0))
+            # Degenerate dimensions: a perfectly horizontal or vertical
+            # detection polygon measures zero (real OCR data). The polygon
+            # is a min/max envelope, so a negative extent is impossible
+            # here; negatives can only arrive in word boxes (below).
+            bbox, bbox_repaired = clamp_degenerate(bbox)
 
             # Per-line word boxes ([l, t, r, b] → [x, y, w, h]) get the same
             # resize + clamp treatment as the line itself. Lines without word
@@ -122,9 +125,16 @@ class WordBoxJsonAdapter(BaseAdapter):
                         factor = 1.0 / geometry_context.resize_factor
                         wb = (wb[0] * factor, wb[1] * factor, wb[2] * factor, wb[3] * factor)
                     wb = (max(0.0, wb[0]), max(0.0, wb[1]), wb[2], wb[3])
-                    # Same degenerate-dimension clamp as the line box.
-                    wb = (wb[0], wb[1], max(wb[2], 1.0), max(wb[3], 1.0))
-                    line_words.append({"text": wtext.strip(), "bbox": wb})
+                    if wb[2] < 0.0 or wb[3] < 0.0:
+                        negative_extents += 1
+                    wb, wb_repaired = clamp_degenerate(wb)
+                    line_words.append(
+                        {
+                            "text": wtext.strip(),
+                            "bbox": wb,
+                            "repaired": wb_repaired,
+                        }
+                    )
 
             word_bboxes.append(bbox)
             word_data.append({
@@ -134,6 +144,7 @@ class WordBoxJsonAdapter(BaseAdapter):
                 "confidence": confidence,
                 "source_idx": idx,
                 "words": line_words,
+                "repaired": bbox_repaired,
                 "ambiguous_reason": reason if not line_words else None,
             })
 
@@ -183,7 +194,9 @@ class WordBoxJsonAdapter(BaseAdapter):
             geo = Geometry(
                 bbox=wd["bbox"],
                 polygon=wd["polygon"],
-                status=GeometryStatus.EXACT,
+                # A clamped degenerate extent is no longer the measured box.
+                status=GeometryStatus.REPAIRED if wd["repaired"]
+                else GeometryStatus.EXACT,
             )
 
             line = region.add_line(
@@ -215,7 +228,8 @@ class WordBoxJsonAdapter(BaseAdapter):
                         geometry=Geometry(
                             bbox=w["bbox"],
                             polygon=None,
-                            status=GeometryStatus.EXACT,
+                            status=GeometryStatus.REPAIRED if w["repaired"]
+                            else GeometryStatus.EXACT,
                         ),
                         provenance=word_prov,
                         confidence=wd["confidence"],
@@ -243,6 +257,13 @@ class WordBoxJsonAdapter(BaseAdapter):
             page.add_warning(
                 f"{skipped_empty} of {len(payload)} detections skipped:"
                 " empty transcription"
+            )
+
+        # A negative extent is corrupt provider data, not a flat polygon.
+        if negative_extents:
+            page.add_warning(
+                f"{negative_extents} boxes repaired: negative extent"
+                " clamped"
             )
 
         return builder.build()

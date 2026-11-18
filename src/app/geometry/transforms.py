@@ -61,6 +61,22 @@ def clip_bbox_to_page(
     return (cx, cy, cx2 - cx, cy2 - cy)
 
 
+def clamp_degenerate(
+    bbox: BBoxTuple, floor: float = 1.0
+) -> tuple[BBoxTuple, bool]:
+    """Floor a bbox's width and height at *floor* pixels.
+
+    A perfectly horizontal or vertical detection polygon measures zero in
+    one dimension; the smallest honest box occupies one pixel in that
+    dimension. Returns `(bbox, repaired)` — `repaired` is True when the
+    clamp changed the measured extent, so the caller can mark the geometry
+    `REPAIRED` instead of `EXACT`.
+    """
+    w = max(bbox[2], floor)
+    h = max(bbox[3], floor)
+    return (bbox[0], bbox[1], w, h), (w != bbox[2] or h != bbox[3])
+
+
 def clip_polygon_to_page(
     polygon: PolygonPoints, page_width: float, page_height: float
 ) -> PolygonPoints:

@@ -70,6 +70,22 @@ class TestLineBoxJsonAdapter:
         lines = doc.pages[0].text_regions[0].lines
         assert [ln.text for ln in lines] == ["Real"]
 
+    def test_negative_extent_clamped_and_warned(
+        self, adapter: LineBoxJsonAdapter, geo_ctx: GeometryContext,
+    ) -> None:
+        payload = [
+            {"text": "Bad", "bbox": [50, 10, -30, 40], "format": "xywh"},
+        ]
+        raw = RawProviderPayload(
+            provider_id="line_model", adapter_id="v1", runtime_type="local",
+            payload=payload, image_width=200, image_height=120,
+        )
+        doc = adapter.normalize(raw, geo_ctx, document_id="d")
+        line = doc.pages[0].text_regions[0].lines[0]
+        assert line.geometry.bbox[2] == 1.0
+        assert line.geometry.status == GeometryStatus.REPAIRED
+        assert "1 boxes repaired: negative extent clamped" in doc.pages[0].warnings
+
     def test_correct_line_count(
         self, adapter: LineBoxJsonAdapter, raw: RawProviderPayload, geo_ctx: GeometryContext,
     ) -> None:

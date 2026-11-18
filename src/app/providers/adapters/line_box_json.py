@@ -29,6 +29,7 @@ from src.app.domain.models.lang import normalize_iso_lang
 from src.app.domain.models.status import EvidenceType, GeometryStatus, InputType
 from src.app.geometry.bbox import union_all
 from src.app.geometry.normalization import xyxy_to_xywh
+from src.app.geometry.transforms import clamp_degenerate
 from src.app.normalization.canonical_builder import CanonicalBuilder
 from src.app.providers.adapters.base import BaseAdapter
 
@@ -78,6 +79,7 @@ class LineBoxJsonAdapter(BaseAdapter):
 
         line_bboxes: list[tuple[float, float, float, float]] = []
         line_data: list[dict] = []
+        negative_extents = 0
 
         for idx, item in enumerate(payload):
             if not isinstance(item, dict):
@@ -99,9 +101,12 @@ class LineBoxJsonAdapter(BaseAdapter):
             else:
                 bbox = xyxy_to_xywh(tuple(float(v) for v in raw_bbox))
 
-            # Degenerate boxes: a zero width or height is not representable
-            # in the canonical model; one pixel is the smallest honest box.
-            bbox = (bbox[0], bbox[1], max(bbox[2], 1.0), max(bbox[3], 1.0))
+            # Degenerate dimensions: a zero extent is a flat polygon; a
+            # negative extent is corrupt data and is counted for a warning.
+            negative_extent = bbox[2] < 0.0 or bbox[3] < 0.0
+            if negative_extent:
+                negative_extents += 1
+            bbox, bbox_repaired = clamp_degenerate(bbox)
 
             confidence = item.get("confidence")
             if confidence is not None:
@@ -113,6 +118,7 @@ class LineBoxJsonAdapter(BaseAdapter):
                 "text": text,
                 "confidence": confidence,
                 "source_idx": idx,
+                "repaired": bbox_repaired,
             })
 
         if not line_data:
@@ -151,7 +157,11 @@ class LineBoxJsonAdapter(BaseAdapter):
                 evidence_type=EvidenceType.PROVIDER_NATIVE,
             )
 
-            geo = Geometry(bbox=ld["bbox"], status=GeometryStatus.EXACT)
+            geo = Geometry(
+                bbox=ld["bbox"],
+                status=GeometryStatus.REPAIRED if ld["repaired"]
+                else GeometryStatus.EXACT,
+            )
 
             line = region.add_line(line_id, geometry=geo, provenance=prov, lang=lang)
             line.add_word(
@@ -161,6 +171,12 @@ class LineBoxJsonAdapter(BaseAdapter):
                 provenance=prov,
                 confidence=ld["confidence"],
                 lang=lang,
+            )
+
+        if negative_extents:
+            page.add_warning(
+                f"{negative_extents} boxes repaired: negative extent"
+                " clamped"
             )
 
         return builder.build()
