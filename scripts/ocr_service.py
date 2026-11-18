@@ -16,6 +16,15 @@ payload JSON; coordinates are in the uploaded image's pixel space, so the
 viewer coordinate contract holds (the preprocessors that would alter the
 coordinate space are disabled here, same as locally).
 
+Deployment requirements:
+- This script needs a CHECKOUT OF THIS REPO on the GPU box (it imports
+  src.app.ocr), not just the pip installs.
+- The service build MUST be the same commit as the XmLLM instance calling
+  it: the transcription-anchored word merge and the exclusion policy run
+  in this process, so a version mismatch changes payload semantics while
+  the recorded provenance still claims the caller's adapter version.
+  GET /version reports the commit; check it after every deploy.
+
 Hardening notes:
 - The handler calls the LOCAL engine runner directly, never the
   dispatching wrapper: if a .env with OCR_SERVICE_URL exists on this box,
@@ -44,6 +53,30 @@ from fastapi import FastAPI, HTTPException, UploadFile  # noqa: E402
 from src.app.ocr import SUPPORTED_PADDLE_LANGS, run_paddle_ocr_local  # noqa: E402
 
 app = FastAPI(title="XmLLM OCR service")
+
+
+@app.get("/version")
+def version() -> dict:
+    """Report the build this service runs.
+
+    The service applies the transcription-anchored word merge and the
+    exclusion policy inside its own process, so its build MUST match the
+    commit of the XmLLM instance calling it (ADR 0001's guarantees and the
+    recorded provenance are only as good as the build that produced the
+    payload). Operators should verify this after every deploy of either
+    side.
+    """
+    import subprocess
+
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=5, check=True,
+            cwd=Path(__file__).parent.parent,
+        ).stdout.strip()
+    except Exception:
+        commit = "unknown (no git metadata)"
+    return {"service": "xmllm-ocr", "commit": commit}
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 _SUFFIX_RE = re.compile(r"\.[A-Za-z0-9]{1,10}")

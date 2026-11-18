@@ -140,9 +140,14 @@ class TestRemoteDispatch:
     def test_local_path_used_without_service_url(
         self, image_file: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """No service URL configured: the local runner is called directly."""
         _use_service(monkeypatch, "")
-        with pytest.raises(Exception) as exc_info:
-            run_paddle_ocr(image_file, "fr")
-        # No HTTP call happened: the local engine path ran and failed on
-        # the stub image bytes, proving the dispatch chose local.
-        assert "unreachable" not in str(exc_info.value)
+        sentinel: list = []
+        monkeypatch.setattr(
+            ocr_module,
+            "run_paddle_ocr_local",
+            lambda path, lang: sentinel.append((path, lang)) or [],
+        )
+        payload = run_paddle_ocr(image_file, "fr")
+        assert payload == []
+        assert len(sentinel) == 1  # routing went local, no HTTP call
