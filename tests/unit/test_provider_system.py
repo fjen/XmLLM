@@ -55,6 +55,21 @@ class TestLineBoxJsonAdapter:
         assert doc.document_id == "test_line"
         assert len(doc.pages) == 1
 
+    def test_whitespace_only_text_skipped(
+        self, adapter: LineBoxJsonAdapter, geo_ctx: GeometryContext,
+    ) -> None:
+        payload = [
+            {"text": "   ", "bbox": [10, 10, 110, 40]},
+            {"text": "Real", "bbox": [10, 60, 110, 90]},
+        ]
+        raw = RawProviderPayload(
+            provider_id="line_model", adapter_id="v1", runtime_type="local",
+            payload=payload, image_width=200, image_height=120,
+        )
+        doc = adapter.normalize(raw, geo_ctx, document_id="d")
+        lines = doc.pages[0].text_regions[0].lines
+        assert [ln.text for ln in lines] == ["Real"]
+
     def test_correct_line_count(
         self, adapter: LineBoxJsonAdapter, raw: RawProviderPayload, geo_ctx: GeometryContext,
     ) -> None:

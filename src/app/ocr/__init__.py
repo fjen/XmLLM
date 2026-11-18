@@ -193,6 +193,12 @@ def run_paddle_ocr(image_path: Path, lang: str) -> list[Any]:
         ):
             points = [[float(x), float(y)] for x, y in poly]
             line_text = str(text)
+            if not line_text.strip():
+                # No text to align: keep the plain two-element form. The
+                # adapter drops this detection; a fragmentation reason
+                # would misdescribe it.
+                payload.append([points, (line_text, float(score))])
+                continue
             if iso3 in WORD_RECONSTRUCTION_DISABLED_LANGS:
                 # Exclusion policy (ADR 0001): no reconstruction, the line
                 # keeps its transcription, the page is flagged.

@@ -80,6 +80,7 @@ class WordBoxJsonAdapter(BaseAdapter):
         word_bboxes: list[tuple[float, float, float, float]] = []
         word_data: list[dict] = []
 
+        skipped_empty = 0
         for idx, item in enumerate(payload):
             points, text_conf = self._parse_item(item, idx)
             text, confidence, words, reason = self._parse_text_conf(text_conf, idx)
@@ -87,6 +88,7 @@ class WordBoxJsonAdapter(BaseAdapter):
             if not text.strip():
                 # A detection without recognized text has no line to build.
                 # PaddleOCR can emit a box whose transcription is empty.
+                skipped_empty += 1
                 continue
 
             bbox = four_point_to_xywh(points)
@@ -146,7 +148,9 @@ class WordBoxJsonAdapter(BaseAdapter):
             adapter=self.version,
             source_ref="$",
             evidence_type=EvidenceType.DERIVED,
-            derived_from=[f"w{i+1}" for i in range(len(word_data))],
+            # The block derives from its lines; line ids are tl{i+1} over
+            # the kept items (word ids are w{i+1}_{j+1} and not uniform).
+            derived_from=[f"tl{i+1}" for i in range(len(word_data))],
         )
 
         region = page.add_text_region(
@@ -225,6 +229,13 @@ class WordBoxJsonAdapter(BaseAdapter):
             page.add_warning(
                 f"{len(ambiguous)} of {len(word_data)} lines: "
                 f"{ambiguous[0]['ambiguous_reason']}"
+            )
+
+        # Textless detections carry no line at all; record the skip.
+        if skipped_empty:
+            page.add_warning(
+                f"{skipped_empty} of {len(payload)} detections skipped:"
+                " empty transcription"
             )
 
         return builder.build()

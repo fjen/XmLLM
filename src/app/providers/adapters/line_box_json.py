@@ -84,7 +84,7 @@ class LineBoxJsonAdapter(BaseAdapter):
                 raise ValueError(f"Item {idx}: expected dict, got {type(item).__name__}")
 
             text = str(item.get("text", ""))
-            if not text:
+            if not text.strip():
                 continue
 
             raw_bbox = item.get("bbox")

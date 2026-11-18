@@ -410,6 +410,20 @@ class TestWordLevelPayload:
         doc = adapter.normalize(raw, geo_ctx, document_id="d")
         lines = doc.pages[0].text_regions[0].lines
         assert [ln.transcription for ln in lines] == ["Real"]
+        assert doc.pages[0].warnings == [
+            "2 of 3 detections skipped: empty transcription"
+        ]
+
+    def test_block_provenance_references_existing_lines(
+        self, adapter: WordBoxJsonAdapter, geo_ctx: GeometryContext
+    ) -> None:
+        """The block's derived_from must name canonical ids that exist."""
+        raw = self._raw()
+        doc = adapter.normalize(raw, geo_ctx, document_id="d")
+        region = doc.pages[0].text_regions[0]
+        line_ids = {ln.id for ln in region.lines}
+        assert region.provenance.derived_from
+        assert set(region.provenance.derived_from) <= line_ids
 
     def test_all_empty_text_payload_raises(
         self, adapter: WordBoxJsonAdapter, geo_ctx: GeometryContext
