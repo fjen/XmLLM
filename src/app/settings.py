@@ -62,6 +62,13 @@ class Settings(BaseSettings):
     api_provider_timeout: int = 60
     api_provider_max_retries: int = 2
 
+    # -- OCR engine -----------------------------------------------------------
+    # When set (e.g. http://gpu-box:8080), run_paddle_ocr posts to the
+    # remote OCR service (scripts/ocr_service.py) instead of loading
+    # PaddleOCR locally. The service returns the same word_box_json
+    # payload in the same coordinate space, so nothing downstream changes.
+    ocr_service_url: str | None = None
+
     # -- Geometry -------------------------------------------------------------
     bbox_containment_tolerance: int = 5
 

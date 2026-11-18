@@ -7,6 +7,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from src.app.settings import get_settings
+
 logger = logging.getLogger(__name__)
 
 _ocr_instances: dict[str, Any] = {}
@@ -160,7 +162,12 @@ def merge_paddle_words(
 
 
 def run_paddle_ocr(image_path: Path, lang: str) -> list[Any]:
-    """Run PaddleOCR (3.x `predict`) and return the word_box_json payload:
+    """Run PaddleOCR and return the word_box_json payload.
+
+    Dispatches to the remote OCR service (`OCR_SERVICE_URL`, served by
+    scripts/ocr_service.py) when configured, and runs local inference
+    otherwise. Both paths return the same payload in the same coordinate
+    space:
         [[4-point polygon, (text, confidence[, words[, ambiguous_reason]])], ...]
 
     With `return_word_box=True` each item's third element carries words
@@ -172,6 +179,44 @@ def run_paddle_ocr(image_path: Path, lang: str) -> list[Any]:
     at all keep the two-element form (adapter falls back to one word per
     line).
     """
+    service_url = get_settings().ocr_service_url
+    if service_url:
+        return _run_remote_ocr(image_path, lang, service_url)
+    return run_paddle_ocr_local(image_path, lang)
+
+
+def _run_remote_ocr(image_path: Path, lang: str, service_url: str) -> list[Any]:
+    """Post the image to the remote OCR service and return its payload.
+
+    The service computes line polygons and word boxes in the uploaded
+    image's pixel space (same bytes, same coordinates), so the viewer
+    contract holds. Engine failures raise RuntimeError, which the job
+    pipeline maps to 422 like any other engine error.
+    """
+    import httpx
+
+    url = service_url.rstrip("/") + "/ocr"
+    with open(image_path, "rb") as f:
+        files = {"image": (image_path.name, f)}
+        try:
+            response = httpx.post(
+                url, files=files, params={"lang": lang}, timeout=600.0
+            )
+        except httpx.HTTPError as exc:
+            raise RuntimeError(f"OCR service unreachable at {url}: {exc}") from exc
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"OCR service {url} failed: HTTP {response.status_code}: "
+            f"{response.text[:500]}"
+        )
+    payload = response.json()
+    if not isinstance(payload, list):
+        raise RuntimeError(f"OCR service {url} returned non-list payload")
+    return payload
+
+
+def run_paddle_ocr_local(image_path: Path, lang: str) -> list[Any]:
+    """Run local PaddleOCR (3.x `predict`) inference."""
     ocr = _get_ocr(lang)
     results = ocr.predict(str(image_path))
     iso3 = paddle_lang_to_iso639_3(lang)
