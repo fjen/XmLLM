@@ -13,7 +13,32 @@ The DFG-Viewer contains almost no ALTO logic. It delegates to Kitodo Presentatio
 - Element IDs are never read. The `_str` suffix on compatibility Strings is invisible to the consumer.
 - Hyphenation: `getRawText` assumes a `HypPart1` String is immediately followed by its `HypPart2` in document order, and joins them (`Alto.php:52-62`). The serializer emits `SUBS_TYPE`/`SUBS_CONTENT` when the `HyphenationBasicEnricher` marks a pair. The constraint is that a marked pair stays adjacent in export order. It does: pairs come from consecutive lines, and words export in line order. Verified on a real page: 12 pairs marked, 24 `SUBS_TYPE` attributes in the export, so the Kitodo join fires in practice.
 - Raw fulltext hyphenation is therefore a best-effort join, with two error types observed on that page. Unmarked: line-end hyphens whose continuation starts uppercase stay space-separated — `Kran-` / `Branntwein`, also `Trichi-`, `Be-`, `Homöo-`, `Hy-`. Marked but wrong: adjacency plus a lowercase-start heuristic cannot prove a word break. Observed mis-joins, re-confirmed from the enrichment run: `Ge-` + `im` joins to "Geim" (a function word is not a continuation), `Min.-Wasser-` + `und` joins across an abbreviation period (a list hyphen, not a word break), `Schwei-` + `synthet.` joins with a part 2 that is itself an abbreviated token, and `Phosphor-` + `säuren,flüchtigeinranzig.Butter261.` joins into an OCR-mashed run-on. Expect both error types in fulltext on dense directory text.
-- Improvement directions, deliberately not done here: never mark a pair when the hyphen follows an abbreviation period (`Min.-`, `Schwei-` is ambiguous but `Min.-` is not), and check part 2 for plausibility (length, no embedded punctuation, case rules) before emitting `SUBS_TYPE`.
+- Improvement directions, deliberately not done here: never mark a pair whose hyphen follows an abbreviation period (`Min.-` is the clear case, `Schwei-` is ambiguous but `Min.-` is not). And check part 2 for plausibility (length, no embedded punctuation, case rules) before the serializer emits `SUBS_TYPE`.
+
+## Export format details
+
+The consumer facts above constrain these mappings.
+
+### ALTO XML v4
+
+- Namespace: `http://www.loc.gov/standards/alto/ns-v4#`
+- Mapping: `Page` / `TextBlock` / `TextLine` / `String`
+- Attributes: `HPOS`, `VPOS`, `WIDTH`, `HEIGHT` (integers), `CONTENT`, `WC`, `LANG`
+- Hyphenation: `SUBS_TYPE` (`HypPart1` / `HypPart2`), `SUBS_CONTENT`
+- `<Description>` carries the measurement unit, the filename and the processing software
+
+### PAGE XML 2019
+
+- Namespace: `http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15`
+- Mapping: `TextRegion` / `TextLine` / `Word`
+- Coordinates: `<Coords points="x1,y1 x2,y2 ...">` preserves polygons when available
+- `<TextEquiv><Unicode>` at region, line and word levels
+- `<ReadingOrder>` / `<OrderedGroup>` / `<RegionRefIndexed>`
+- Region `@type` maps from the block role (paragraph, heading, footnote, ...)
+
+### Key difference
+
+ALTO uses axis-aligned bounding boxes with integer coordinates. PAGE XML uses polygons and preserves the original quadrilateral geometry from providers like PaddleOCR.
 
 ## Schema validation
 
@@ -23,7 +48,7 @@ Schema validation is not wired into CI. It needs a network fetch of the XSD. Re-
 
 ## Consequences
 
-- Compatibility Strings from the line-level fallback (ADR 0001) are safe for this consumer. Each renders as one word spanning the line box. Clicking or highlighting a "word" in such a line highlights the whole line. Word-precision interaction is lost on those lines only.
+- Compatibility Strings from the line-level fallback (ADR 0001) are safe for this consumer. Each renders as one word spanning the line box. A click or a highlight on a "word" in such a line covers the whole line. Word-precision interaction is lost on those lines only.
 - Every `TextLine` must contain at least one `String`. The canonical invariant (words or transcription, never neither) guarantees this. Keep it.
 - `SP` stays in the export. The XSD content model expects it between Strings, and other consumers do read it.
 - Do not rely on element IDs in ALTO for anything consumer-facing. They are our bookkeeping.

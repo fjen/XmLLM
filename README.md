@@ -1,503 +1,120 @@
----
-title: XmLLM
-emoji: "\U0001F4C4"
-colorFrom: blue
-colorTo: purple
-sdk: docker
-app_port: 7860
-pinned: false
-license: apache-2.0
-short_description: "Document structure engine: OCR output to ALTO XML & PAGE XML"
----
-
 # XmLLM
 
-**Canonical-first document structure engine** that converts OCR/VLM provider outputs into validated **ALTO XML** and **PAGE XML**, via an internal canonical representation.
+XmLLM converts scanned pages into validated **ALTO XML** and **PAGE XML**. It runs OCR (PaddleOCR, or your own provider output), normalizes the result into an internal canonical model with full provenance, and exports standards-compliant XML from that model. A web UI shows the result as an overlay on the page image.
 
-XmLLM is not tied to any specific OCR model. It is centered on a **canonical document contract** — a normalized, provenance-tracked, geometry-aware internal model that absorbs heterogeneous provider outputs and produces standards-compliant XML exports.
+The same code runs locally and in Docker.
 
-## Key features
-
-- **Dual native export** — ALTO XML v4 and PAGE XML 2019 from the same canonical model
-- **Provider-agnostic** — adapters for PaddleOCR (word+polygon), line-level OCR, and text-only mLLM
-- **Full provenance** — every node tracks how its data was obtained (native, derived, repaired, manual)
-- **Geometry subsystem** — normalization, transforms, quantization, tolerance-based containment
-- **Validation pipeline** — structural checks, readiness assessment, export eligibility with configurable policy
-- **Enrichment pipeline** — polygon-to-bbox, language propagation, reading order inference, hyphenation detection
-- **Job orchestration** — 13-step pipeline with event logging, artifact persistence, state machine
-- **REST API** — FastAPI with OpenAPI docs, provider management, job lifecycle, export downloads
-- **Deployable anywhere** — same code runs locally, in Docker, and on Hugging Face Spaces
-
-## Architecture
-
-The system is organized in four concentric layers (anneaux):
+## How it works
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  D — Presentation (frontend, viewer)                    │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │  C — API (FastAPI routes, request/response)       │  │
-│  │  ┌─────────────────────────────────────────────┐  │  │
-│  │  │  B — Execution (providers, jobs, persistence)│  │  │
-│  │  │  ┌───────────────────────────────────────┐  │  │  │
-│  │  │  │  A — Domain (models, geometry,        │  │  │  │
-│  │  │  │     validators, enrichers, serializers)│  │  │  │
-│  │  │  └───────────────────────────────────────┘  │  │  │
-│  │  └─────────────────────────────────────────────┘  │  │
-│  └───────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
+image or raw provider JSON
+  → provider runtime (local / hub / api)
+  → raw payload (stored for audit)
+  → adapter (provider output → canonical model)
+  → CanonicalDocument
+  → enrichers (bbox repair, language, reading order, hyphenation)
+  → validators (structure, readiness, export eligibility)
+  → policy (strict / standard / permissive)
+  → ALTO XML + PAGE XML + viewer projection
 ```
 
-**Dependencies flow inward only.** The domain layer has no dependency on FastAPI, the database, or the frontend.
-
-### Three internal objects
+Three internal objects keep the responsibilities apart:
 
 | Object | Role | Never used for |
 |---|---|---|
-| `RawProviderPayload` | Source truth — raw provider output, stored for audit | Export, rendering |
-| `CanonicalDocument` | Business truth — normalized, validated, enriched | Direct UI rendering |
-| `ViewerProjection` | Rendering truth — lightweight overlays for the viewer | Validation, export decisions |
+| `RawProviderPayload` | Source truth | Export, rendering |
+| `CanonicalDocument` | Business truth | Direct UI rendering |
+| `ViewerProjection` | Rendering truth | Validation, export decisions |
 
-### Processing pipeline
-
-```
-Input (image / raw JSON)
-  → Provider Runtime (local / hub / api)
-  → Raw Provider Payload (stored)
-  → Adapter / Normalization (provider-specific → canonical)
-  → CanonicalDocument
-  → Enrichers (polygon→bbox, lang propagation, reading order, hyphenation)
-  → Validators (structural, readiness, export eligibility)
-  → Document Policy (strict / standard / permissive)
-  → ALTO XML Serializer  ─→  alto.xml
-  → PAGE XML Serializer  ─→  page.xml
-  → Viewer Projection     ─→  viewer.json
-  → Persistence (SQLite + filesystem)
-```
+The domain layer depends on nothing. FastAPI, persistence and the frontend sit on top of it. Every node in the canonical model carries geometry (`bbox` as `(x, y, width, height)`, origin top-left, unit px) and provenance (`provider`, `adapter`, `source_ref`, `evidence_type`). Details: [docs/canonical-document.md](docs/canonical-document.md), [docs/provider-system.md](docs/provider-system.md), [docs/enrichers.md](docs/enrichers.md) and [docs/adr/0002-alto-export-consumer-contract.md](docs/adr/0002-alto-export-consumer-contract.md).
 
 ## Quick start
 
-### Local (Python)
+### Local
 
 ```bash
-# Clone and install
-git clone https://github.com/maribakulj/XmLLM.git
+git clone https://github.com/fjen/XmLLM.git
 cd XmLLM
 pip install -e ".[dev]"
-
-# Configure
 cp .env.example .env
-
-# Run
 uvicorn src.app.main:app --host 0.0.0.0 --port 7860
-
-# Open http://localhost:7860 for the web UI
-# Open http://localhost:7860/docs for the API documentation
 ```
+
+Open http://localhost:7860 for the web UI and http://localhost:7860/docs for the API documentation.
 
 ### Docker
 
 ```bash
 docker compose up --build
-# Open http://localhost:7860
 ```
 
-### Hugging Face Spaces
+## Batch processing
 
-The same Docker image runs as a Docker Space. Set persistent storage to enable `/data`:
-
-```
-HF_HOME=/data/.huggingface
-STORAGE_ROOT=/data
-```
-
-The application auto-detects Space mode via the `SPACE_ID` environment variable.
-
-### Batch (no server)
-
-Generate ALTO XML for a directory (or several) of scanned images
-(TIFF, JPEG, PNG, WebP, BMP) without running the HTTP API — the pipeline
-executes in-process and each file becomes a normal persisted job under
-`STORAGE_ROOT/jobs/<job_id>/`:
+Export ALTO XML for a directory of scans without the server:
 
 ```bash
-python scripts/batch_alto.py /path/to/book1 /path/to/book2 --lang fr
-python scripts/batch_alto.py /path/to/book --lang en --out /path/to/alto
+python scripts/batch_alto.py /path/to/book --lang de
+python scripts/batch_alto.py /path/to/book --lang de --out /path/to/alto
 ```
 
-- `--lang` sets the PaddleOCR language code (default: `en`); it must be one of
-  the supported codes (`en`, `fr`, `de`, `ch`, `japan`, …). It is also mapped
-  to ISO 639-3 and stamped onto canonical nodes, so ALTO output carries
-  `LANG` attributes (e.g. `fr` → `LANG="fra"`)
-- `--out` optionally copies each `alto.xml` as `<image-stem>.xml`
-- images whose ALTO output already exists are **skipped** on rerun (with
-  `--out`: the destination XML exists; without: a prior job for the same
-  filename produced ALTO). Use `--no-skip-existing` to reprocess everything
-- `--storage-root` overrides `STORAGE_ROOT` (default: `./data` or the `.env` value)
-- batch jobs do **not** copy the source image into the job directory (the
-  file already lives on disk); the viewer image route 404s for batch jobs
-- exit code 0 only if every image produced ALTO
+- `--lang` is a PaddleOCR language code (`de`, `fr`, `en`, `ch`, `japan`, ...). The batch maps it to ISO 639-3 and stamps it into the canonical nodes, so ALTO carries `LANG` attributes.
+- The batch skips images whose ALTO output already exists. Without `--out`, an image counts as done when a prior job for the same filename produced ALTO. Files with the same name in different directories count as the same image. Use `--no-skip-existing` to reprocess.
+- `--out` copies each `alto.xml` as `<image-stem>.xml`. `--storage-root` overrides `STORAGE_ROOT`.
+- Batch jobs keep the source image in place. The web UI shows no page image for them.
+- Exit code 0 only if every image produced ALTO.
 
 ## Remote OCR (GPU offload)
 
-If local CPU inference is too slow, run PaddleOCR on a separate GPU server
-and point XmLLM at it with `OCR_SERVICE_URL`. Setup, version pinning,
-security and benchmarking: [docs/ocr-service.md](docs/ocr-service.md).
-
-One trap that fails silently: `pyproject.toml` pins the CPU wheel
-(`paddlepaddle`), and `uv run` / `uv sync` re-sync from `uv.lock`. On the
-GPU box, install the GPU wheel **after** the project deps and never re-sync
-afterwards — otherwise the next `uv run` quietly puts the CPU wheel back and
-the service runs at CPU speed. The startup log (`CUDA build=...`) and
-`curl /version` catch it. Details in the guide.
-
-## API reference
-
-All endpoints are documented at `/docs` (Swagger UI) when the server is running.
-
-### Health
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/health` | Status, version, execution mode |
-
-### OCR
-
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/ocr` | Upload an image, run PaddleOCR, produce ALTO/PAGE XML. `lang` query param selects the PaddleOCR language (default `fr`; see supported codes in `src/app/ocr/__init__.py`) |
-
-### Providers
-
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/providers` | Register a provider profile |
-| `GET` | `/providers` | List all registered providers |
-| `GET` | `/providers/{id}` | Get provider details |
-| `DELETE` | `/providers/{id}` | Delete a provider |
-
-### Jobs
-
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/jobs` | Create and run a job (upload raw payload JSON) |
-| `GET` | `/jobs` | List jobs (with pagination) |
-| `GET` | `/jobs/{id}` | Get job details and status |
-| `GET` | `/jobs/{id}/logs` | Get pipeline event log |
-
-### Exports
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/jobs/{id}/raw` | Download raw provider payload |
-| `GET` | `/jobs/{id}/canonical` | Download canonical document JSON |
-| `GET` | `/jobs/{id}/alto` | Download ALTO XML |
-| `GET` | `/jobs/{id}/pagexml` | Download PAGE XML |
-| `GET` | `/jobs/{id}/viewer` | Get viewer projection JSON |
-
-### Example: run a job via API
-
-```bash
-curl -X POST "http://localhost:7860/jobs?provider_id=paddleocr&provider_family=word_box_json&image_width=2480&image_height=3508" \
-  -F "raw_payload_file=@paddle_output.json"
-```
-
-## Canonical document
-
-The `CanonicalDocument` is the central model. It represents **what the system knows about the page**, not what a specific model produced.
-
-### Hierarchy
+Local CPU inference is slow. Run PaddleOCR on a GPU box and point XmLLM at it:
 
 ```
-CanonicalDocument
-  └── Page[]
-       ├── TextRegion[] (blocks)
-       │    └── TextLine[]
-       │         └── Word[]
-       └── NonTextRegion[] (illustrations, tables, separators)
+OCR_SERVICE_URL=http://gpu-box:8080
 ```
 
-### Every node carries
+The service returns the same payload as local inference, so nothing downstream changes. Measured on an A40: about 2.7 s per archival page, versus 60 to 230 s on CPU.
 
-- **geometry** — `bbox: (x, y, width, height)` + optional `polygon` + `status` (exact / inferred / repaired / unknown)
-- **provenance** — `provider`, `adapter`, `source_ref`, `evidence_type` (provider_native / derived / repaired / manual), `derived_from`
-- **metadata** — extensible `dict` for future fields without schema changes
+Setup, security, version pinning and benchmarks: [docs/ocr-service.md](docs/ocr-service.md).
 
-### Geometry conventions
-
-| Convention | Value |
-|---|---|
-| bbox format | `(x, y, width, height)` |
-| Coordinate origin | `top_left` |
-| Unit | `px` |
-| Polygon | `list[tuple[float, float]]` or `None` |
-
-Providers returning `(x1, y1, x2, y2)` are converted in their adapter. No serializer performs implicit geometry conversion.
-
-## Provider system
-
-The provider system separates three concerns:
-
-| Layer | Question | Examples |
-|---|---|---|
-| **Runtime** | How do I execute it? | `local`, `hub`, `api` |
-| **Family** | What shape is the output? | `word_box_json`, `line_box_json`, `text_only` |
-| **Profile** | What is this specific instance? | PaddleOCR local at `/models/paddle`, Qwen API at `https://...` |
-
-### Adapter families
-
-| Family | Output shape | Geometry | ALTO export |
-|---|---|---|---|
-| `word_box_json` | Words with 4-point polygons (PaddleOCR) | Exact | Full |
-| `line_box_json` | Lines with bboxes, no word segmentation | Exact (line-level) | Full (1 word per line) |
-| `text_only` | Structured text, no coordinates (mLLM) | Unknown | Refused (honest) |
-
-### Capability matrix
-
-Each provider profile declares a `CapabilityMatrix`:
-
-```
-block_geometry, line_geometry, word_geometry, polygon_geometry,
-baseline, reading_order, text_confidence, language,
-non_text_regions, tables, rotation_info
-```
-
-## Validation and policy
-
-### Four validators
-
-| Validator | Checks |
-|---|---|
-| **Schema** | Pydantic v2 model validation with structured error report |
-| **Structural** | ID uniqueness, reading order references, bbox containment (configurable tolerance) |
-| **Readiness** | Per-page ALTO/PAGE readiness: full, partial, degraded, or none |
-| **Export eligibility** | Independent go/no-go for ALTO, PAGE, and viewer |
-
-### Document policy
-
-Three modes controlling what the system may do:
-
-| Mode | Inference | Partial exports | Tolerance |
-|---|---|---|---|
-| `strict` | No polygon-to-bbox, no lang propagation, no reading order inference | Refused | 5px |
-| `standard` (default) | Polygon-to-bbox, lang propagation, reading order, hyphenation | Allowed | 5px |
-| `permissive` | All enrichments enabled | Allowed | 10px |
-
-All modes enforce: **no text invention**, **no bbox invention**.
-
-## Enrichers
-
-Enrichers run after normalization, before validation. Each produces a new immutable document.
-
-| Enricher | What it does | Provenance |
-|---|---|---|
-| `polygon_to_bbox` | Derives bbox from polygon when geometry is `unknown` | `inferred` |
-| `bbox_repair_light` | Clips bboxes overflowing page boundaries | `repaired` |
-| `lang_propagation` | Propagates language from region/line to child nodes | unchanged |
-| `reading_order_simple` | Infers reading order by spatial position (top-to-bottom, left-to-right) | `inferred` |
-| `hyphenation_basic` | Detects word-ending `-` at line boundary with lowercase continuation | `inferred` |
-| `text_consistency` | Warns on blank or suspiciously long words (>100 chars) | warnings only |
-
-## Export formats
-
-### ALTO XML v4
-
-- Namespace: `http://www.loc.gov/standards/alto/ns-v4#`
-- Mapping: `Page` / `TextBlock` / `TextLine` / `String`
-- Attributes: `HPOS`, `VPOS`, `WIDTH`, `HEIGHT` (integer), `CONTENT`, `WC`, `LANG`
-- Hyphenation: `SUBS_TYPE` (HypPart1/HypPart2), `SUBS_CONTENT`
-- Includes `<Description>` with measurement unit, filename, processing software
-
-### PAGE XML 2019
-
-- Namespace: `http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15`
-- Mapping: `TextRegion` / `TextLine` / `Word`
-- Coordinates: `<Coords points="x1,y1 x2,y2 ...">` — preserves polygons when available
-- `<TextEquiv><Unicode>` at region, line, and word levels
-- `<ReadingOrder>` / `<OrderedGroup>` / `<RegionRefIndexed>`
-- Region `@type` mapped from block role (paragraph, heading, footnote, etc.)
-
-### Key difference
-
-ALTO uses axis-aligned bounding boxes (integers). PAGE XML uses polygons (preserves original quadrilateral geometry from providers like PaddleOCR).
-
-## Project structure
-
-```
-XmLLM/
-  pyproject.toml              # Dependencies and build config
-  Dockerfile                  # Deployable container
-  docker-compose.yml          # Local dev with volume
-  AGENTS.md                   # Architecture rules (non-negotiable)
-  .env.example                # Configuration reference
-
-  src/app/
-    main.py                   # FastAPI app entry point
-    settings.py               # SettingsService (auto-detects local vs Space)
-
-    api/                      # Anneau C — HTTP routes
-      routes_health.py
-      routes_providers.py
-      routes_jobs.py
-      routes_exports.py
-      routes_viewer.py
-
-    domain/                   # Anneau A — Pure domain
-      models/
-        canonical_document.py # CanonicalDocument, Word, TextLine, TextRegion, Page
-        geometry.py           # Point, BBox, Polygon, Baseline, Geometry, GeometryContext
-        provenance.py         # Provenance with conditional validation
-        readiness.py          # AltoReadiness, PageXmlReadiness, ExportEligibility
-        status.py             # 12 domain enums
-        raw_payload.py        # RawProviderPayload
-        viewer_projection.py  # OverlayItem, InspectionData, ViewerProjection
-      errors/                 # ValidationReport, ValidationEntry, Severity
-
-    geometry/                 # Geometric operations
-      bbox.py                 # contains, intersects, union, iou, expand (12 ops)
-      polygon.py              # polygon<->bbox, area, centroid, validation (7 ops)
-      baseline.py             # length, angle, interpolation
-      transforms.py           # rescale, clip, rotate, translate
-      normalization.py        # xyxy->xywh, 4-point->bbox, pixel<->normalized
-      quantization.py         # float->int strategies, tolerance checks
-
-    providers/                # Anneau B — Provider system
-      registry.py             # Central adapter + runtime index
-      resolver.py             # Profile -> runtime + adapter
-      profiles.py             # ProviderProfile model
-      capabilities.py         # CapabilityMatrix
-      runtimes/
-        base.py               # BaseRuntime ABC
-        local_runtime.py
-        hub_runtime.py
-        api_runtime.py
-      adapters/
-        base.py               # BaseAdapter ABC
-        word_box_json.py      # PaddleOCR format
-        line_box_json.py      # Line-level OCR
-        text_only.py          # mLLM without geometry
-
-    normalization/
-      pipeline.py             # Raw -> CanonicalDocument orchestration
-      canonical_builder.py    # Fluent builder for CanonicalDocument
-
-    enrichers/
-      __init__.py             # BaseEnricher ABC + EnricherPipeline
-      polygon_to_bbox.py
-      bbox_repair_light.py
-      lang_propagation.py
-      reading_order_simple.py
-      hyphenation_basic.py
-      text_consistency.py
-
-    validators/
-      schema_validator.py
-      structural_validator.py
-      readiness_validator.py
-      export_eligibility_validator.py
-
-    policies/
-      document_policy.py      # Strict / standard / permissive modes
-      export_policy.py        # Per-format go/no-go decisions
-
-    serializers/
-      alto_xml.py             # CanonicalDocument -> ALTO XML v4
-      page_xml.py             # CanonicalDocument -> PAGE XML 2019
-
-    viewer/
-      projection_builder.py   # CanonicalDocument -> ViewerProjection
-      overlays.py             # Node -> OverlayItem/InspectionData
-
-    jobs/
-      models.py               # Job model (5-state machine)
-      events.py               # EventLog with timed steps
-      service.py              # JobService (13-step pipeline orchestrator)
-
-    persistence/
-      db.py                   # SQLite (jobs + providers)
-      file_store.py           # Filesystem artifact store
-
-  frontend/static/
-    index.html                # Single-page web UI
-
-  tests/
-    fixtures/                 # 7 test fixtures (simple, columns, noisy, etc.)
-    unit/                     # 24 unit test modules
-    integration/              # 5 integration test modules
-```
+One trap fails silently there: the repo pins the CPU paddle wheel, and `uv run` / `uv sync` restore it from `uv.lock`. On the GPU box, install the GPU wheel last and never re-sync. The startup log and `GET /version` catch it.
 
 ## Configuration
 
-Copy `.env.example` to `.env` and adjust:
+Copy `.env.example` to `.env`. The OCR settings:
 
-| Variable | Default | Description |
+| Variable | Default | Meaning |
 |---|---|---|
-| `APP_MODE` | `local` | `local` or `space` (auto-detected from `SPACE_ID`) |
-| `STORAGE_ROOT` | `./data` | Root for all persistent data |
-| `DB_NAME` | `app.db` | SQLite database filename |
-| `HOST` | `0.0.0.0` | Server bind address |
-| `PORT` | `7860` | Server port |
-| `MAX_UPLOAD_SIZE` | `52428800` | Max upload size in bytes (50 MB) |
-| `ALLOWED_MIME_TYPES` | `image/png,jpeg,tiff,webp` | Accepted upload types |
-| `PROVIDER_TIMEOUT` | `120` | Provider execution timeout (seconds) |
-| `BBOX_CONTAINMENT_TOLERANCE` | `5` | Pixels of allowed bbox overflow |
+| `OCR_SERVICE_URL` | unset | Offload OCR to `scripts/ocr_service.py`. Unset = local |
+| `OCR_DEVICE` | unset | Paddle device, e.g. `gpu:0`. Unset = auto-select |
+| `OCR_RECOGNITION_BATCH_SIZE` | unset | Recognition batch size. Unset = Paddle default |
+| `OCR_TEXTLINE_ORIENTATION` | unset | Set `false` to skip the per-line orientation classifier. Unset = on |
+
+`.env.example` documents the other variables (`STORAGE_ROOT`, `MAX_UPLOAD_SIZE`, `BBOX_CONTAINMENT_TOLERANCE`, ...).
+
+## API
+
+Start the server and open `/docs` for the full OpenAPI reference. Main endpoints:
+
+- `POST /ocr`: upload an image, run OCR, get ALTO/PAGE XML. `?lang=` selects the language
+- `POST /jobs` and `GET /jobs/{id}`: run and inspect a job from raw provider JSON
+- `GET /jobs/{id}/alto`, `/jobs/{id}/pagexml`, `/jobs/{id}/canonical`, `/jobs/{id}/raw`: downloads
+- `GET /jobs/{id}/viewer`: viewer projection for the web UI
+- `GET /providers`: provider profile management
+- `GET /health`: status
+
+## Validation and policy
+
+Export decisions pass through validators and a document policy. When the engine cannot map word positions, the line keeps its transcription and the system flags the page instead of guessing coordinates. The validator set, the policy modes and the no-invention rules: [docs/canonical-document.md](docs/canonical-document.md). The word reconstruction contract: [docs/adr/0001-transcription-anchored-word-merge.md](docs/adr/0001-transcription-anchored-word-merge.md). The export consumer contract: [docs/adr/0002-alto-export-consumer-contract.md](docs/adr/0002-alto-export-consumer-contract.md).
 
 ## Testing
 
 ```bash
-# Run all tests
-pytest
-
-# With coverage
-pytest --cov=src --cov-report=term-missing
-
-# Only unit tests
-pytest tests/unit/
-
-# Only integration tests
-pytest tests/integration/
+pytest                      # everything
+pytest tests/unit/          # unit tests
+pytest tests/integration/   # integration tests
 ```
 
-**497 tests** covering:
-- Domain models (validation, rejection, JSON round-trips)
-- Geometry operations (all transforms, containment, quantization)
-- Adapters (PaddleOCR, line-box, text-only formats)
-- Serializers (ALTO structure, PAGE structure, hyphenation, polygons)
-- Validators (structural, readiness, export eligibility)
-- Enrichers (all 6 enrichers + pipeline + policy control)
-- Persistence (file store, SQLite CRUD)
-- API routes (providers, jobs, exports, viewer)
-- End-to-end fixtures (simple page, double column, noisy page, title+body, hyphenation, text-only)
-
-## V1 scope
-
-### Included
-
-- Single image input
-- Local, Hub, and API runtimes (skeleton — raw payloads provided directly in V1)
-- 3 adapter families (word_box_json, line_box_json, text_only)
-- Full CanonicalDocument with provenance and geometry
-- ALTO XML v4 and PAGE XML 2019 native export
-- 6 enrichers with policy control
-- 4 validators with configurable tolerance
-- Job orchestration with event logging
-- SQLite + filesystem persistence
-- REST API with OpenAPI docs
-- Web UI for upload, job management, and export download
-- Docker deployment
-
-### Excluded (V2+)
-
-- PDF multipage input
-- Live model execution (currently raw payloads are provided externally)
-- Manual editing of canonical documents
-- Multi-user collaboration
-- Batch processing
-- Fine-tuning
-- Advanced table extraction
-- OpenSeadragon interactive viewer with overlays
-- Authentication
+More than 650 tests cover domain models, geometry, adapters, serializers, validators, enrichers, persistence, API routes and end-to-end fixtures.
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+Apache 2.0. See [LICENSE](LICENSE).
