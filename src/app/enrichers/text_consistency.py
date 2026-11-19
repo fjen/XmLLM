@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from src.app.enrichers import BaseEnricher
 
 if TYPE_CHECKING:
-    from src.app.domain.models import CanonicalDocument
+    from src.app.domain.models import CanonicalDocument, TextLine
     from src.app.policies.document_policy import DocumentPolicy
 
 
@@ -53,13 +53,13 @@ class TextConsistencyEnricher(BaseEnricher):
     SUSPECT_CONFIDENCE_THRESHOLD = 0.75
 
     @staticmethod
-    def _check_confidence(region_id: str, line_id: str, line: object) -> str | None:
+    def _check_confidence(region_id: str, line_id: str, line: TextLine) -> str | None:
         """Flag lines whose engine confidence marks them as suspect.
 
         The engine scores text lines, not words, so this is a per-line
         signal. Warnings only — the text is never dropped or changed.
         """
-        confidence = getattr(line, "confidence", None)
+        confidence = line.confidence
         if confidence is None or confidence >= TextConsistencyEnricher.SUSPECT_CONFIDENCE_THRESHOLD:
             return None
         return (
@@ -68,25 +68,21 @@ class TextConsistencyEnricher(BaseEnricher):
         )
 
     @staticmethod
-    def _check_line(region_id: str, line_id: str, line: object) -> list[str]:
+    def _check_line(region_id: str, line_id: str, line: TextLine) -> list[str]:
         """Check text consistency within a line."""
         warnings: list[str] = []
-        words = getattr(line, "words", [])
 
-        if not words:
-            return warnings
-
-        for i, word in enumerate(words):
-            text = getattr(word, "text", "")
+        for word in line.words:
+            text = word.text
             if not text.strip():
                 warnings.append(
-                    f"{region_id}/{line_id}: word {getattr(word, 'id', i)} has blank text"
+                    f"{region_id}/{line_id}: word {word.id} has blank text"
                 )
 
             # Check for suspiciously long "words" (likely unsplit lines)
             if len(text) > 100:
                 warnings.append(
-                    f"{region_id}/{line_id}: word {getattr(word, 'id', i)} "
+                    f"{region_id}/{line_id}: word {word.id} "
                     f"is suspiciously long ({len(text)} chars) — may be an unsplit line"
                 )
 
