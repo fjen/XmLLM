@@ -79,7 +79,9 @@ def version() -> dict:
         commit = "unknown (no git metadata)"
     return {"service": "xmllm-ocr", "commit": commit}
 
-MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+# Kept in sync with settings.max_ocr_image_size (the client's own upload
+# gate); --max-upload-mb overrides for a deployment with other needs.
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 _SUFFIX_RE = re.compile(r"\.[A-Za-z0-9]{1,10}")
 
 

@@ -13,7 +13,11 @@ from fastapi import APIRouter, HTTPException, UploadFile
 
 from src.app.api import get_job_service
 from src.app.domain.models import RawProviderPayload
-from src.app.ocr import SUPPORTED_IMAGE_EXTENSIONS, SUPPORTED_PADDLE_LANGS
+from src.app.ocr import (
+    OcrPayloadTooLarge,
+    SUPPORTED_IMAGE_EXTENSIONS,
+    SUPPORTED_PADDLE_LANGS,
+)
 from src.app.settings import get_settings
 
 router = APIRouter(tags=["ocr"])
@@ -105,6 +109,10 @@ async def ocr_image(image: UploadFile, lang: str = "fr") -> dict[str, Any]:
                 detail=f"PaddleOCR failed for lang '{lang}' "
                 f"({type(exc).__name__})",
             ) from exc
+        except OcrPayloadTooLarge as exc:
+            # The request passed our gate but the service's limit is
+            # lower. 413 with the service's words, not an opaque 500.
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
         except HTTPException:
             raise
         except Exception:

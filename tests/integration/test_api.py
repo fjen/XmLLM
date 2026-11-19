@@ -398,6 +398,24 @@ class TestOcr:
                 files={"image": ("page.png", self._png_bytes(), "image/png")},
             )
 
+    def test_service_rejection_returns_413(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src.app.ocr import OcrPayloadTooLarge
+
+        def too_large(image_path: Path, lang: str) -> list:
+            raise OcrPayloadTooLarge(
+                "OCR service rejected the upload as too large"
+            )
+
+        monkeypatch.setattr("src.app.ocr.run_paddle_ocr", too_large)
+        r = client.post(
+            "/ocr?lang=de",
+            files={"image": ("page.png", self._png_bytes(), "image/png")},
+        )
+        assert r.status_code == 413
+        assert "too large" in r.json()["detail"]
+
     def test_corrupt_image_returns_422(
         self, client: TestClient, stub_ocr: None
     ) -> None:

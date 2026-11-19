@@ -56,6 +56,16 @@ class _FailingHandler(_StubOcrHandler):
         self.wfile.write(detail)
 
 
+class _TooLargeHandler(_StubOcrHandler):
+    def do_POST(self) -> None:  # noqa: N802
+        detail = json.dumps({"detail": "upload too large"}).encode()
+        self.send_response(413)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(detail)))
+        self.end_headers()
+        self.wfile.write(detail)
+
+
 @pytest.fixture
 def stub_server():
     def start(handler: type[BaseHTTPRequestHandler]) -> str:
@@ -126,6 +136,17 @@ class TestRemoteDispatch:
         _use_service(monkeypatch, url)
 
         with pytest.raises(RuntimeError, match="HTTP 500.*engine exploded"):
+            run_paddle_ocr(image_file, "fr")
+
+    def test_service_413_raises_payload_too_large(
+        self, stub_server, image_file: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        url = stub_server(_TooLargeHandler)
+        _use_service(monkeypatch, url)
+
+        with pytest.raises(
+            ocr_module.OcrPayloadTooLarge, match="too large"
+        ):
             run_paddle_ocr(image_file, "fr")
 
     def test_unreachable_service_raises(

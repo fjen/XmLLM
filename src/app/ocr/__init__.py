@@ -11,6 +11,14 @@ from src.app.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
+
+class OcrPayloadTooLarge(RuntimeError):
+    """The remote OCR service rejected the upload as too large.
+
+    Subclasses RuntimeError so existing engine-error handlers keep
+    working; the /ocr route maps it to an honest 413 instead of 500.
+    """
+
 _ocr_instances: dict[str, Any] = {}
 
 # Bound on cached PaddleOCR instances. Each holds a full model set, so an
@@ -219,6 +227,13 @@ def _run_remote_ocr(image_path: Path, lang: str, service_url: str) -> list[Any]:
             )
         except httpx.HTTPError as exc:
             raise RuntimeError(f"OCR service unreachable at {url}: {exc}") from exc
+    if response.status_code == 413:
+        # The request passed our own gate but the service's limit is
+        # lower: surface it as 413 instead of an opaque server error.
+        raise OcrPayloadTooLarge(
+            f"OCR service rejected the upload as too large "
+            f"({response.text[:200] or 'limit reached'})"
+        )
     if response.status_code != 200:
         raise RuntimeError(
             f"OCR service {url} failed: HTTP {response.status_code}: "
