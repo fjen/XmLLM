@@ -340,10 +340,6 @@
       <div class="icon-img">&#128193;</div>
       <div class="icon-label">Documents</div>
     </div>
-    <div class="desktop-icon" onclick="showPage('advanced')">
-      <div class="icon-img">&#9881;</div>
-      <div class="icon-label">Advanced</div>
-    </div>
   </div>
 
   <!-- ═══ SCAN WINDOW ═══ -->
@@ -447,58 +443,6 @@
     </div>
   </div>
 
-  <!-- ═══ ADVANCED WINDOW (raw payload) ═══ -->
-  <div id="page-advanced" class="window hidden">
-    <div class="titlebar">
-      <span class="close-box"></span>
-      <span class="stripes"></span>
-      <span class="title-text">Advanced &mdash; Raw Payload</span>
-      <span class="stripes"></span>
-    </div>
-    <div class="menubar">
-      <span>File</span>
-    </div>
-    <div class="window-body">
-      <p style="margin-bottom:12px;font-size:11px;color:#555;">
-        Upload a raw OCR JSON payload manually (for providers other than PaddleOCR).
-      </p>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-        <div>
-          <label>Raw Payload JSON</label>
-          <input type="file" id="payload-file" accept=".json">
-        </div>
-        <div>
-          <label>Provider Family</label>
-          <select id="provider-family" style="font-family:inherit;font-size:11px;padding:2px;width:100%;border:2px solid var(--border);">
-            <option value="word_box_json">word_box_json (PaddleOCR)</option>
-            <option value="line_box_json">line_box_json</option>
-            <option value="text_only">text_only (mLLM)</option>
-          </select>
-        </div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;">
-        <div>
-          <label>Provider ID</label>
-          <input type="text" id="provider-id" value="paddleocr" style="font-family:inherit;font-size:11px;padding:2px;width:100%;border:2px solid var(--border);">
-        </div>
-        <div>
-          <label>Image Width (px)</label>
-          <input type="number" id="img-width" value="2480" style="font-family:inherit;font-size:11px;padding:2px;width:100%;border:2px solid var(--border);">
-        </div>
-        <div>
-          <label>Image Height (px)</label>
-          <input type="number" id="img-height" value="3508" style="font-family:inherit;font-size:11px;padding:2px;width:100%;border:2px solid var(--border);">
-        </div>
-      </div>
-      <button class="primary" id="btn-run-advanced" onclick="runAdvanced()">Run Pipeline</button>
-      <span id="adv-status" style="margin-left:8px;font-size:11px;color:#888;"></span>
-    </div>
-    <div class="status-bar">
-      <span>Manual mode</span>
-      <span>XmLLM v0.1.0</span>
-    </div>
-  </div>
-
 <script>
 const API = '';
 window.API_BASE = API;  // consumed by viewer.js (loaded after this script)
@@ -512,7 +456,7 @@ function escapeHtml(s) {
 }
 
 function showPage(name) {
-  ['scan','jobs','advanced'].forEach(p => {
+  ['scan','jobs'].forEach(p => {
     document.getElementById('page-' + p).classList.add('hidden');
   });
   document.getElementById('page-' + name).classList.remove('hidden');
@@ -690,38 +634,6 @@ document.getElementById('jobs-table').addEventListener('click', e => {
   const btn = e.target.closest('[data-job-id]');
   if (btn) viewJob(btn.dataset.jobId);
 });
-
-/* ── Advanced (raw payload) ── */
-async function runAdvanced() {
-  const fileInput = document.getElementById('payload-file');
-  if (!fileInput.files.length) { alert('Select a payload JSON file'); return; }
-  const btn = document.getElementById('btn-run-advanced');
-  const status = document.getElementById('adv-status');
-  btn.disabled = true;
-  status.textContent = 'Running\u2026';
-
-  const fd = new FormData();
-  fd.append('raw_payload_file', fileInput.files[0]);
-
-  const params = new URLSearchParams({
-    provider_id: document.getElementById('provider-id').value,
-    provider_family: document.getElementById('provider-family').value,
-    image_width: document.getElementById('img-width').value,
-    image_height: document.getElementById('img-height').value,
-  });
-
-  try {
-    const r = await fetch(API + '/jobs?' + params, { method: 'POST', body: fd });
-    const data = await r.json();
-    btn.disabled = false;
-    status.textContent = r.ok
-      ? '\u2713 ' + data.status + (data.duration_ms ? ' (' + Math.round(data.duration_ms) + 'ms)' : '')
-      : 'Error: ' + (data.detail || r.statusText);
-  } catch(e) {
-    btn.disabled = false;
-    status.textContent = 'Error: ' + e.message;
-  }
-}
 </script>
 <script src="/static/viewer.js"></script>
 </body>
