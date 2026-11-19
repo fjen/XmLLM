@@ -59,8 +59,8 @@ The document policy has three modes:
 
 | Mode | Inference | Partial exports | Tolerance |
 |---|---|---|---|
-| `strict` | No polygon-to-bbox, no language propagation, no reading-order inference | Refused | 5 px |
-| `standard` (default) | Polygon-to-bbox, language propagation, reading order, hyphenation | Allowed | 5 px |
+| `strict` | No polygon-to-bbox, no language propagation, no reading-order inference, no block splitting | Refused | 5 px |
+| `standard` (default) | Polygon-to-bbox, language propagation, reading order, block splitting, hyphenation | Allowed | 5 px |
 | `permissive` | All enrichments | Allowed | 10 px |
 
 All modes enforce two rules: no invented text, no invented bounding boxes.

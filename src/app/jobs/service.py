@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 from src.app.domain.models.geometry import GeometryContext
 from src.app.enrichers import EnricherPipeline
 from src.app.enrichers.bbox_repair_light import BboxRepairLightEnricher
+from src.app.enrichers.block_split import BlockSplitEnricher
 from src.app.enrichers.hyphenation_basic import HyphenationBasicEnricher
 from src.app.enrichers.lang_propagation import LangPropagationEnricher
 from src.app.enrichers.polygon_to_bbox import PolygonToBboxEnricher
@@ -54,6 +55,10 @@ def _default_enricher_pipeline() -> EnricherPipeline:
         PolygonToBboxEnricher(),
         BboxRepairLightEnricher(),
         LangPropagationEnricher(),
+        # Runs before reading_order_simple: it rebuilds the region set and
+        # writes the reading order from its band/column tree itself, so
+        # reading_order_simple then no-ops instead of sorting stale ids.
+        BlockSplitEnricher(),
         ReadingOrderSimpleEnricher(),
         HyphenationBasicEnricher(),
         TextConsistencyEnricher(),
