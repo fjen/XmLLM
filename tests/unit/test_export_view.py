@@ -8,6 +8,7 @@ from src.app.domain.models import (
     EvidenceType,
     Geometry,
     GeometryStatus,
+    Hyphenation,
     Page,
     PageXmlReadiness,
     Provenance,
@@ -41,6 +42,22 @@ def _line(line_id: str, y: float, confidence: float | None) -> TextLine:
             id=f"w_{line_id}", text="word", geometry=_geo(y),
             confidence=confidence, provenance=_prov(),
         )],
+    )
+
+
+def _hyphenated_line(
+    line_id: str, y: float, confidence: float, part: int, text: str
+) -> TextLine:
+    word = Word(
+        id=f"w_{line_id}", text=text, geometry=_geo(y),
+        confidence=confidence, provenance=_prov(),
+        hyphenation=Hyphenation(
+            is_hyphenated=True, part=part, full_form="Silberling"
+        ),
+    )
+    return TextLine(
+        id=line_id, geometry=_geo(y), provenance=_prov(),
+        confidence=confidence, words=[word],
     )
 
 
@@ -104,4 +121,18 @@ class TestAltoExportView:
 
         assert view is doc
         assert view.pages[0].reading_order == ["tb1"]
+        assert omitted == 0
+
+    def test_keeps_low_confidence_line_that_holds_a_hyphenation_part(self) -> None:
+        doc = _doc([
+            _hyphenated_line("tl_a", 220, 0.40, 1, "Sil-"),
+            _hyphenated_line("tl_b", 260, 0.99, 2, "berling"),
+        ])
+
+        view, omitted = build_alto_export_view(
+            doc, DocumentPolicy(alto_min_line_confidence=0.75)
+        )
+
+        # The pair stays together: the consumer joins part 1 and part 2.
+        assert view is doc
         assert omitted == 0

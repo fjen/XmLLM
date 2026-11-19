@@ -25,9 +25,11 @@ def build_alto_export_view(
 ) -> tuple[CanonicalDocument, int]:
     """Remove ALTO lines below the policy confidence threshold.
 
-    Lines without a confidence stay. A text block that loses every line is
-    removed, and the page reading order no longer names it. If no line is
-    removed, the input document comes back unchanged.
+    Lines without a confidence stay. A line that carries a hyphenation part
+    stays too, because the consumer joins the two parts of a pair. A text
+    block that loses every line is removed, and the page reading order no
+    longer names it. If no line is removed, the input document comes back
+    unchanged.
 
     Returns:
         The pruned document and the number of omitted lines.
@@ -61,5 +63,8 @@ def build_alto_export_view(
 
 
 def _keep_line(line: TextLine, threshold: float) -> bool:
-    """A line stays when it has no score, or when the score meets the limit."""
-    return line.confidence is None or line.confidence >= threshold
+    """A line stays when it meets the limit, has no score, or carries a
+    hyphenation part. The exporter keeps hyphenation pairs together."""
+    if line.confidence is None or line.confidence >= threshold:
+        return True
+    return any(word.hyphenation is not None for word in line.words)
