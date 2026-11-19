@@ -47,7 +47,12 @@ def line_to_overlay(line: TextLine) -> OverlayItem:
 
 
 def region_to_overlay(region: TextRegion) -> OverlayItem:
-    """Convert a TextRegion to an OverlayItem."""
+    """Convert a TextRegion to an OverlayItem.
+
+    A block often has no own score, because the engine scores lines. The
+    overlay then carries the lowest line score. The viewer confidence
+    filter can hide or show blocks this way.
+    """
     return OverlayItem(
         id=region.id,
         level=OverlayLevel.BLOCK,
@@ -55,10 +60,22 @@ def region_to_overlay(region: TextRegion) -> OverlayItem:
         polygon=region.geometry.polygon,
         label=region.role.value if region.role else "block",
         text=region.text[:100] if region.text else None,
-        confidence=region.confidence,
+        confidence=_block_confidence(region),
         provenance_type=region.provenance.evidence_type,
         geometry_status=region.geometry.status,
     )
+
+
+def _block_confidence(region: TextRegion) -> float | None:
+    """Return the block score, or the lowest line score, or None."""
+    if region.confidence is not None:
+        return region.confidence
+    scores = [
+        line.confidence
+        for line in region.lines
+        if line.confidence is not None
+    ]
+    return min(scores) if scores else None
 
 
 def non_text_to_overlay(ntr: NonTextRegion) -> OverlayItem:

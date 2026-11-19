@@ -129,6 +129,42 @@ class TestOverlayGeneration:
         assert ov.level == OverlayLevel.BLOCK
         assert ov.label == "heading"
 
+    def test_region_overlay_takes_lowest_line_score(self) -> None:
+        r = TextRegion(
+            id="tb1", geometry=_geo(0, 0, 500, 100), provenance=_prov(),
+            lines=[
+                TextLine(id="tl1", geometry=_geo(), provenance=_prov(),
+                         confidence=0.97,
+                         words=[Word(id="w1", text="a", geometry=_geo(),
+                                     provenance=_prov())]),
+                TextLine(id="tl2", geometry=_geo(), provenance=_prov(),
+                         confidence=0.52,
+                         words=[Word(id="w2", text="b", geometry=_geo(),
+                                     provenance=_prov())]),
+            ],
+        )
+        assert region_to_overlay(r).confidence == 0.52
+
+    def test_region_overlay_keeps_own_score(self) -> None:
+        r = TextRegion(
+            id="tb1", geometry=_geo(0, 0, 500, 100), provenance=_prov(),
+            confidence=0.88,
+            lines=[TextLine(id="tl1", geometry=_geo(), provenance=_prov(),
+                            confidence=0.52,
+                            words=[Word(id="w1", text="a", geometry=_geo(),
+                                        provenance=_prov())])],
+        )
+        assert region_to_overlay(r).confidence == 0.88
+
+    def test_region_overlay_has_no_score_without_line_scores(self) -> None:
+        r = TextRegion(
+            id="tb1", geometry=_geo(0, 0, 500, 100), provenance=_prov(),
+            lines=[TextLine(id="tl1", geometry=_geo(), provenance=_prov(),
+                            words=[Word(id="w1", text="a", geometry=_geo(),
+                                        provenance=_prov())])],
+        )
+        assert region_to_overlay(r).confidence is None
+
     def test_word_inspection(self) -> None:
         w = Word(id="w1", text="Hello", geometry=_geo(10, 20, 50, 30),
                  provenance=_prov(), confidence=0.95, lang="eng")
