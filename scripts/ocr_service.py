@@ -11,7 +11,7 @@ produces, so the XmLLM UI can offload inference:
     # on the XmLLM machine:
     #   OCR_SERVICE_URL=http://gpu-box:8080 uv run uvicorn src.app.main:app --port 7860
 
-Endpoint: POST /ocr?lang=fr with multipart field "image". Returns the
+Endpoint: POST /ocr?lang=de with multipart field "image". Returns the
 payload JSON; coordinates are in the uploaded image's pixel space, so the
 viewer coordinate contract holds (the preprocessors that would alter the
 coordinate space are disabled here, same as locally).
@@ -31,7 +31,7 @@ Hardening notes:
   the service must not POST to itself and recurse.
 - Uploads land in a NamedTemporaryFile whose name uses only the file
   suffix, never the caller-controlled filename (no path traversal).
-- Uploads are capped (--max-upload-mb, default 50); this endpoint is
+- Uploads are capped (--max-upload-mb, default 100 MB); this endpoint is
   unauthenticated, so do not expose it beyond trusted networks.
 
 Note: PaddleOCR's GPU build needs the paddlepaddle-gpu wheel matching the
