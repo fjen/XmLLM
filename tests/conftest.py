@@ -6,10 +6,22 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from src.app.settings import Settings
+from src.app.settings import Settings, get_settings
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
+
+
+@pytest.fixture(autouse=True)
+def _fresh_settings_cache():
+    """Keep the lru_cache on get_settings() from leaking between tests.
+
+    Tests that change env vars mid-test would otherwise read a cached
+    Settings instance from an earlier run.
+    """
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 @pytest.fixture

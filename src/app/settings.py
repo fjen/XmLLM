@@ -57,6 +57,12 @@ class Settings(BaseSettings):
     max_ocr_image_pixels: int = 150_000_000  # 150 MP decoded
     allowed_mime_types: str = "image/png,image/jpeg,image/tiff,image/webp"
 
+    # -- ALTO export ----------------------------------------------------------
+    # Drop <TextLine> elements whose engine confidence is below this value
+    # (0-1) from the ALTO export only. The canonical document keeps every
+    # line. Unset keeps everything (default).
+    alto_min_line_confidence: float | None = None
+
     # -- Provider defaults ----------------------------------------------------
     provider_timeout: int = 120
     api_provider_timeout: int = 60

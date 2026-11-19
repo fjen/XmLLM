@@ -36,12 +36,36 @@ class TextConsistencyEnricher(BaseEnricher):
                     if line_warnings:
                         warnings.extend(line_warnings)
                         changed = True
+                    low_conf = self._check_confidence(region.id, line.id, line)
+                    if low_conf:
+                        warnings.append(low_conf)
+                        changed = True
 
             new_pages.append(page.model_copy(update={"warnings": warnings}))
 
         if changed:
             return doc.model_copy(update={"pages": new_pages})
         return doc
+
+    # Engine confidence below this marks a line as suspect. Measured on
+    # bleed-through scans: ghost lines (mirrored backside text misread as
+    # garbage) all score below 0.75, real text sits at 0.97 and above.
+    SUSPECT_CONFIDENCE_THRESHOLD = 0.75
+
+    @staticmethod
+    def _check_confidence(region_id: str, line_id: str, line: object) -> str | None:
+        """Flag lines whose engine confidence marks them as suspect.
+
+        The engine scores text lines, not words, so this is a per-line
+        signal. Warnings only — the text is never dropped or changed.
+        """
+        confidence = getattr(line, "confidence", None)
+        if confidence is None or confidence >= TextConsistencyEnricher.SUSPECT_CONFIDENCE_THRESHOLD:
+            return None
+        return (
+            f"{region_id}/{line_id}: low engine confidence "
+            f"({confidence:.2f}) — possible ghost text or unreadable passage"
+        )
 
     @staticmethod
     def _check_line(region_id: str, line_id: str, line: object) -> list[str]:

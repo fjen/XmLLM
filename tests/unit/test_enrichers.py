@@ -55,10 +55,13 @@ def _word(wid: str, text: str, x: float = 10, y: float = 10, w: float = 50, h: f
 
 
 def _line(lid: str, words: list[Word], x: float = 10, y: float = 10,
-          w: float = 200, h: float = 30, lang: str | None = None) -> TextLine:
+          w: float = 200, h: float = 30, lang: str | None = None,
+          confidence: float | None = None,
+          transcription: str | None = None) -> TextLine:
     return TextLine(
         id=lid, geometry=_geo(x, y, w, h), provenance=_prov(),
-        words=words, lang=lang,
+        words=words, lang=lang, confidence=confidence,
+        transcription=transcription,
     )
 
 
@@ -407,6 +410,38 @@ class TestTextConsistency:
         doc = _doc([_region("tb1", [_line("tl1", [_word("w1", long_text)])])])
         enriched = TextConsistencyEnricher().enrich(doc, DocumentPolicy())
         assert any("suspiciously long" in w for w in enriched.pages[0].warnings)
+
+    def test_flags_low_confidence_line(self) -> None:
+        # Ghost-line regime measured on the bleed-through scans: suspect
+        # lines score below 0.75, real text at 0.97 and above.
+        low = _line("tl_low", [_word("w1", "dbaodan")], confidence=0.52)
+        high = _line("tl_high", [_word("w2", "Apotheke")], y=60, confidence=0.998)
+        doc = _doc([_region("tb1", [low, high])])
+
+        enriched = TextConsistencyEnricher().enrich(doc, DocumentPolicy())
+
+        warnings = enriched.pages[0].warnings
+        assert any("tl_low" in w and "0.52" in w for w in warnings)
+        assert not any("tl_high" in w for w in warnings)
+
+    def test_skips_lines_without_confidence(self) -> None:
+        doc = _doc([_region("tb1", [_line("tl1", [_word("w1", "hello")])])])
+        enriched = TextConsistencyEnricher().enrich(doc, DocumentPolicy())
+        assert not any("low engine confidence" in w
+                       for w in enriched.pages[0].warnings)
+
+    def test_flags_wordless_fallback_line(self) -> None:
+        # ADR 0001 line-level fallback lines carry transcription but no
+        # words; the confidence check must not be blocked by the words
+        # guard in _check_line.
+        fallback = _line("tl1", [], confidence=0.48,
+                         transcription="unlesbare Zeile")
+        doc = _doc([_region("tb1", [fallback])])
+
+        enriched = TextConsistencyEnricher().enrich(doc, DocumentPolicy())
+
+        warnings = enriched.pages[0].warnings
+        assert any("tl1" in w and "0.48" in w for w in warnings)
 
 
 # -- Pipeline ----------------------------------------------------------------

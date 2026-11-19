@@ -57,6 +57,7 @@ def serialize_alto(
     rounding: RoundingStrategy = RoundingStrategy.ROUND,
     pretty_print: bool = True,
     encoding: str = "UTF-8",
+    min_line_confidence: float | None = None,
 ) -> bytes:
     """Serialize a CanonicalDocument to ALTO v4 XML bytes.
 
@@ -65,11 +66,23 @@ def serialize_alto(
         rounding: Strategy for converting float coordinates to integers.
         pretty_print: Whether to indent the XML output.
         encoding: Output encoding.
+        min_line_confidence: When set, omit <TextLine> elements whose
+            engine confidence is below this value (lines without a
+            confidence are always kept). TextBlocks that lose all lines
+            are omitted too. The canonical document is not modified.
 
     Returns:
         The ALTO XML as bytes.
     """
-    root = _build_alto_tree(doc, rounding)
+    root, dropped = _build_alto_tree(doc, rounding, min_line_confidence)
+    if dropped:
+        root.insert(
+            0,
+            etree.Comment(
+                f" {dropped} TextLine(s) omitted: engine confidence"
+                f" below {min_line_confidence:g} "
+            ),
+        )
     return etree.tostring(
         root,
         pretty_print=pretty_print,
@@ -82,17 +95,22 @@ def serialize_alto_to_string(
     doc: CanonicalDocument,
     *,
     rounding: RoundingStrategy = RoundingStrategy.ROUND,
+    min_line_confidence: float | None = None,
 ) -> str:
     """Serialize to a UTF-8 string (convenience for tests)."""
-    return serialize_alto(doc, rounding=rounding).decode("utf-8")
+    return serialize_alto(
+        doc, rounding=rounding, min_line_confidence=min_line_confidence
+    ).decode("utf-8")
 
 
 # -- Tree construction --------------------------------------------------------
 
 
 def _build_alto_tree(
-    doc: CanonicalDocument, rounding: RoundingStrategy
-) -> etree._Element:
+    doc: CanonicalDocument,
+    rounding: RoundingStrategy,
+    min_line_confidence: float | None = None,
+) -> tuple[etree._Element, int]:
     root = etree.Element(f"{{{ALTO_NS}}}alto", nsmap=NSMAP)
     root.set(f"{{{XSI_NS}}}schemaLocation", SCHEMA_LOCATION)
 
@@ -102,10 +120,11 @@ def _build_alto_tree(
 
     # <Layout>
     layout = etree.SubElement(root, f"{{{ALTO_NS}}}Layout")
+    dropped = 0
     for page in doc.pages:
-        _add_page(layout, page, rounding)
+        dropped += _add_page(layout, page, rounding, min_line_confidence)
 
-    return root
+    return root, dropped
 
 
 def _add_description(desc: etree._Element, doc: CanonicalDocument) -> None:
@@ -128,9 +147,15 @@ def _add_description(desc: etree._Element, doc: CanonicalDocument) -> None:
 
 
 def _add_page(
-    layout: etree._Element, page: Page, rounding: RoundingStrategy
-) -> None:
-    """Add a <Page> with its <PrintSpace> and blocks."""
+    layout: etree._Element,
+    page: Page,
+    rounding: RoundingStrategy,
+    min_line_confidence: float | None = None,
+) -> int:
+    """Add a <Page> with its <PrintSpace> and blocks.
+
+    Returns the number of TextLines omitted by the confidence filter.
+    """
     page_el = etree.SubElement(layout, f"{{{ALTO_NS}}}Page")
     page_el.set("ID", page.id)
     page_el.set("PHYSICAL_IMG_NR", str(page.page_index + 1))
@@ -144,14 +169,34 @@ def _add_page(
     ps.set("WIDTH", str(int(page.width)))
     ps.set("HEIGHT", str(int(page.height)))
 
+    dropped = 0
     for region in page.text_regions:
-        _add_text_block(ps, region, rounding)
+        dropped += _add_text_block(ps, region, rounding, min_line_confidence)
+    return dropped
 
 
 def _add_text_block(
-    parent: etree._Element, region: TextRegion, rounding: RoundingStrategy
-) -> None:
-    """Add a <TextBlock> with its lines."""
+    parent: etree._Element,
+    region: TextRegion,
+    rounding: RoundingStrategy,
+    min_line_confidence: float | None = None,
+) -> int:
+    """Add a <TextBlock> with its lines.
+
+    When `min_line_confidence` is set, lines whose confidence is below it
+    are omitted (lines without a confidence are kept). A block that loses
+    every line is omitted entirely. Returns the number of omitted lines.
+    """
+    lines = region.lines
+    if min_line_confidence is not None:
+        lines = [
+            ln for ln in region.lines
+            if ln.confidence is None or ln.confidence >= min_line_confidence
+        ]
+        if not lines:
+            return len(region.lines)
+    dropped = len(region.lines) - len(lines)
+
     tb = etree.SubElement(parent, f"{{{ALTO_NS}}}TextBlock")
     tb.set("ID", region.id)
     _set_bbox_attrs(tb, region.geometry.bbox, rounding)
@@ -159,8 +204,9 @@ def _add_text_block(
     if region.lang:
         tb.set("LANG", region.lang)
 
-    for line in region.lines:
+    for line in lines:
         _add_text_line(tb, line, rounding)
+    return dropped
 
 
 def _add_text_line(

@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+import pytest
 from src.app.domain.models import RawProviderPayload
 from src.app.jobs.models import JobStatus
 from src.app.jobs.service import JobService
 from src.app.persistence.db import Database
 from src.app.persistence.file_store import FileStore
+from src.app.settings import get_settings
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -235,4 +237,54 @@ class TestJobService:
         doc = CanonicalDocument.model_validate(canon_data)
         assert doc.document_id == job.job_id
         assert len(doc.pages) == 1
+        db.close()
+
+    def test_alto_export_drops_low_confidence_lines(
+        self, tmp_storage: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        svc, db, store = self._setup(tmp_storage)
+        # Two engine lines: one ghost (0.40), one real (0.99).
+        raw = RawProviderPayload(
+            provider_id="paddleocr",
+            adapter_id="adapter.word_box_json.v1",
+            runtime_type="local",
+            payload=[
+                [[[10, 10], [140, 10], [140, 40], [10, 40]],
+                 ("dbaodan", 0.40, [["dbaodan", (10, 10, 140, 40)]])],
+                [[[10, 50], [200, 50], [200, 80], [10, 80]],
+                 ("Apotheke", 0.99, [["Apotheke", (10, 50, 200, 80)]])],
+            ],
+            image_width=2480, image_height=3508,
+        )
+        job = svc.create_job(
+            provider_id="paddleocr",
+            provider_family="word_box_json",
+            source_filename="page.tif",
+        )
+
+        # Control run without the setting: both lines are exported.
+        result = svc.run_job(job, raw, image_width=2480, image_height=3508)
+        alto = store.load_alto(result.job_id)
+        assert b"dbaodan" in alto and b"Apotheke" in alto
+
+        # With the setting, the ghost line is dropped from the export only.
+        monkeypatch.setenv("ALTO_MIN_LINE_CONFIDENCE", "0.75")
+        # get_settings() is lru_cached; the control run above cached the
+        # default instance. Clear so the new env var is picked up, and
+        # clear again afterwards so nothing leaks into other tests.
+        get_settings.cache_clear()
+        job2 = svc.create_job(
+            provider_id="paddleocr",
+            provider_family="word_box_json",
+            source_filename="page.tif",
+        )
+        result2 = svc.run_job(job2, raw, image_width=2480, image_height=3508)
+        alto2 = store.load_alto(result2.job_id)
+        assert b"dbaodan" not in alto2
+        assert b"Apotheke" in alto2
+        assert b"1 TextLine(s) omitted" in alto2
+        # The canonical keeps everything.
+        canon = store.load_canonical(result2.job_id)
+        lines = [ln for r in canon["pages"][0]["text_regions"] for ln in r["lines"]]
+        assert len(lines) == 2
         db.close()
