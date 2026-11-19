@@ -14,7 +14,7 @@ Enrichers run after normalization, before validation. Each one takes a `Canonica
 
 ## Known limits
 
-`block_split` works on line boxes only, so it knows no semantic roles. A figure's axis labels and margin numbers share the column region they sit beside instead of becoming a separate figure region. A line that bridges a column gutter merges the columns instead of guessing, and a short paragraph-ending line can become its own block. The reading order stays correct in all these cases. Only the block granularity is coarser than a layout model would give.
+`block_split` works on line boxes only, so it knows no semantic roles. Column clusters split on disjoint x-ranges. A margin number that sits clear of the text column therefore becomes its own block. A line that bridges a column gutter merges the columns instead of guessing. A short paragraph-ending line can become its own block. The reading order stays correct in all these cases. The blocks follow geometry, not layout semantics.
 
 A future layout-model pass (PP-DocLayout) would slot in as a region proposer feeding the same assignment. A note for that path: jobs persist only the JPEG preview of the input. A model re-run over an existing job works from a quality-85 JPEG, not the archival original. Its blocks must not claim provider-native evidence measured on the source scan.
 
