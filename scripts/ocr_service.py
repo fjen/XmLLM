@@ -115,7 +115,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
-    parser.add_argument("--max-upload-mb", type=int, default=50)
+    parser.add_argument(
+        "--max-upload-mb", type=int, default=None,
+        help="Upload size cap in MB. Unset: the module default (kept in"
+             " sync with settings.max_ocr_image_size).",
+    )
     parser.add_argument(
         "--device", default=None,
         help="Paddle device (e.g. gpu:0). Unset: PaddleOCR auto-selects"
@@ -125,7 +129,8 @@ def main() -> int:
     if args.device:
         os.environ["OCR_DEVICE"] = args.device
     global MAX_UPLOAD_BYTES
-    MAX_UPLOAD_BYTES = args.max_upload_mb * 1024 * 1024
+    if args.max_upload_mb is not None:
+        MAX_UPLOAD_BYTES = args.max_upload_mb * 1024 * 1024
     import uvicorn
 
     uvicorn.run(app, host=args.host, port=args.port)
