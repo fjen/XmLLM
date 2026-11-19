@@ -60,6 +60,13 @@ class DocumentPolicy(BaseModel):
     allow_partial_page: bool = True
     """Allow PAGE export with partial readiness."""
 
+    alto_min_line_confidence: float | None = None
+    """Omit ALTO lines below this engine confidence.
+
+    The export view applies the limit before serialization. The canonical
+    document keeps every line. None keeps all lines.
+    """
+
     # -- Enricher rules -------------------------------------------------------
     allow_reading_order_inference: bool = True
     """Allow inferring reading order from spatial position."""

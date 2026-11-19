@@ -64,3 +64,7 @@ The document policy has three modes:
 | `permissive` | All enrichments | Allowed | 10 px |
 
 All modes enforce two rules: no invented text, no invented bounding boxes.
+
+The policy field `alto_min_line_confidence` sets a confidence limit for the
+ALTO export. The export view removes lines below the limit before
+serialization. The canonical document keeps every line.

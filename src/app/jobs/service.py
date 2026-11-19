@@ -36,6 +36,7 @@ from src.app.jobs.models import Job, JobStatus
 from src.app.normalization.pipeline import normalize
 from src.app.policies.document_policy import DocumentPolicy
 from src.app.policies.export_policy import check_alto_export, check_page_export
+from src.app.policies.export_view import build_alto_export_view
 from src.app.serializers.alto_xml import serialize_alto
 from src.app.serializers.page_xml import serialize_page_xml
 from src.app.settings import get_settings
@@ -111,7 +112,11 @@ class JobService:
         viewer's /jobs/{id}/image route then 404s for the job).
         """
         if policy is None:
-            policy = DocumentPolicy()
+            policy = DocumentPolicy(
+                alto_min_line_confidence=(
+                    get_settings().alto_min_line_confidence
+                )
+            )
         if enricher_pipeline is None:
             enricher_pipeline = _default_enricher_pipeline()
 
@@ -186,11 +191,11 @@ class JobService:
             alto_decision = check_alto_export(eligibility, policy)
             if alto_decision.allowed:
                 with events.step(JobStep.EXPORT_ALTO):
+                    alto_view, omitted = build_alto_export_view(canonical, policy)
                     alto_bytes = serialize_alto(
-                        canonical,
-                        min_line_confidence=(
-                            get_settings().alto_min_line_confidence
-                        ),
+                        alto_view,
+                        omitted_line_count=omitted or None,
+                        omitted_line_threshold=policy.alto_min_line_confidence,
                     )
                     self._store.save_alto(job.job_id, alto_bytes)
                     job = job.model_copy(update={"has_alto": True})

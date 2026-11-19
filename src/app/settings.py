@@ -58,9 +58,9 @@ class Settings(BaseSettings):
     allowed_mime_types: str = "image/png,image/jpeg,image/tiff,image/webp"
 
     # -- ALTO export ----------------------------------------------------------
-    # Drop <TextLine> elements whose engine confidence is below this value
-    # (0-1) from the ALTO export only. The canonical document keeps every
-    # line. Unset keeps everything (default).
+    # Omit ALTO lines below this engine confidence (0-1). JobService copies
+    # the value into the document policy. The export view applies it. The
+    # canonical document keeps every line. Unset keeps everything (default).
     alto_min_line_confidence: float | None = None
 
     # -- Provider defaults ----------------------------------------------------

@@ -20,6 +20,6 @@ A future layout-model pass (PP-DocLayout) would slot in as a region proposer fee
 
 `hyphenation_basic` uses a basic adjacency heuristic. It misses continuations that start uppercase, and it can mis-pair list hyphens. ADR 0002 records the observed cases and the consumer-side effect.
 
-`text_consistency` flags lines whose engine confidence falls below 0.75. The engine scores text lines, not words, so this is a per-line signal. It is warnings only: the enricher never drops or changes text. The warnings surface in the viewer as validation flags. They do not reach the ALTO or PAGE export. The DFG-Viewer consumer reads only the attributes listed in ADR 0002, and `WC` is not among them. The companion setting `ALTO_MIN_LINE_CONFIDENCE` goes further: it drops such lines from the ALTO export entirely, while the canonical document keeps everything.
+`text_consistency` flags lines whose engine confidence falls below 0.75. The engine scores text lines, not words, so this is a per-line signal. It is warnings only: the enricher never drops or changes text. The warnings surface in the viewer as validation flags. They do not reach the ALTO or PAGE export. The DFG-Viewer consumer reads only the attributes listed in ADR 0002, and `WC` is not among them. The companion setting `ALTO_MIN_LINE_CONFIDENCE` sets a policy rule. The export view removes such lines before serialization. The canonical document keeps everything.
 
 Enrichers never invent text and never invent coordinates without a geometric basis. See `AGENTS.md` for the full rule set.
