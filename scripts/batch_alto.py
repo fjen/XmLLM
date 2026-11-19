@@ -46,8 +46,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--lang",
-        default="en",
-        help="PaddleOCR language code (default: en). E.g. en, fr, de, es.",
+        default="de",
+        help="PaddleOCR language code (default: de). E.g. en, fr, de, es.",
     )
     parser.add_argument(
         "--out",

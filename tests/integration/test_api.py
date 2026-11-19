@@ -289,7 +289,7 @@ class TestOcr:
 
         monkeypatch.setattr("src.app.ocr.run_paddle_ocr", fake_run_paddle_ocr)
 
-    def test_default_lang_is_fra(self, client: TestClient, stub_ocr: None) -> None:
+    def test_default_lang_is_deu(self, client: TestClient, stub_ocr: None) -> None:
         r = client.post(
             "/ocr",
             files={"image": ("page.png", self._png_bytes(), "image/png")},
@@ -301,7 +301,7 @@ class TestOcr:
         assert alto.status_code == 200
         root = etree.fromstring(alto.content)
         for s in root.findall(".//{*}String"):
-            assert s.get("LANG") == "fra"
+            assert s.get("LANG") == "deu"
 
     def test_lang_param_stamps_iso639_3(
         self, client: TestClient, stub_ocr: None

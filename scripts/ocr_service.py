@@ -86,7 +86,7 @@ _SUFFIX_RE = re.compile(r"\.[A-Za-z0-9]{1,10}")
 
 
 @app.post("/ocr")
-def ocr(image: UploadFile, lang: str = "en") -> list:
+def ocr(image: UploadFile, lang: str = "de") -> list:
     """Sync handler: Starlette runs it in its threadpool, so the blocking
     predict() call holds one worker thread, not the event loop."""
     if lang not in SUPPORTED_PADDLE_LANGS:

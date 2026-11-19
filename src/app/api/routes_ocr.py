@@ -26,11 +26,11 @@ logger = logging.getLogger(__name__)
 
 
 @router.post("/ocr", status_code=201)
-async def ocr_image(image: UploadFile, lang: str = "fr") -> dict[str, Any]:
+async def ocr_image(image: UploadFile, lang: str = "de") -> dict[str, Any]:
     """Upload an image, run PaddleOCR, and produce ALTO/PAGE XML.
 
     This is the main user-facing endpoint — no JSON payload needed.
-    `lang` (default: "fr") is the PaddleOCR language code (e.g. en, fr, de,
+    `lang` (default: "de") is the PaddleOCR language code (e.g. en, fr, de,
     ch); it also stamps the ISO 639-3 language onto the canonical document
     and the ALTO LANG attributes.
     """
