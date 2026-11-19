@@ -51,6 +51,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from fastapi import FastAPI, HTTPException, UploadFile  # noqa: E402
+from src.app.limits import DEFAULT_MAX_UPLOAD_BYTES  # noqa: E402
 from src.app.ocr import SUPPORTED_PADDLE_LANGS, run_paddle_ocr_local  # noqa: E402
 
 app = FastAPI(title="XmLLM OCR service")
@@ -79,9 +80,9 @@ def version() -> dict:
         commit = "unknown (no git metadata)"
     return {"service": "xmllm-ocr", "commit": commit}
 
-# Kept in sync with settings.max_ocr_image_size (the client's own upload
-# gate); --max-upload-mb overrides for a deployment with other needs.
-MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+# Same default as the client gate (settings.max_ocr_image_size).
+# --max-upload-mb overrides it for a deployment with other needs.
+MAX_UPLOAD_BYTES = DEFAULT_MAX_UPLOAD_BYTES
 _SUFFIX_RE = re.compile(r"\.[A-Za-z0-9]{1,10}")
 
 
@@ -117,8 +118,8 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument(
         "--max-upload-mb", type=int, default=None,
-        help="Upload size cap in MB. Unset: the module default (kept in"
-             " sync with settings.max_ocr_image_size).",
+        help="Upload size cap in MB. Unset uses the same default as the"
+             " client gate (settings.max_ocr_image_size).",
     )
     parser.add_argument(
         "--device", default=None,

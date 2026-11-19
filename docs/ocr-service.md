@@ -52,7 +52,7 @@ Flags:
 |---|---|---|
 | `--host` / `--port` | `0.0.0.0` / `8080` | Bind address |
 | `--device` | auto | `gpu:0` pins the GPU. Unset, PaddleOCR auto-selects: GPU if the paddle build supports CUDA, else CPU |
-| `--max-upload-mb` | module default, 100 MB | Upload size cap; unset follows `settings.max_ocr_image_size` |
+| `--max-upload-mb` | module default, 100 MB | Upload size cap. Unset uses the same default as the client gate (`settings.max_ocr_image_size`). An env override of that setting does not reach the service. |
 
 Throughput tuning: set `OCR_RECOGNITION_BATCH_SIZE` (e.g. `16`) in the GPU box's
 `.env` to raise PaddleOCR's recognition batch size (pipeline default 6). Dense

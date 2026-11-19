@@ -14,6 +14,8 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from src.app.limits import DEFAULT_MAX_UPLOAD_BYTES
+
 
 class AppMode(StrEnum):
     LOCAL = "local"
@@ -53,7 +55,7 @@ class Settings(BaseSettings):
 
     # POST /ocr limits. Defaults sized for archival scanning: 800 DPI A3
     # decodes to ~124 MP, so the pixel cap sits above that with margin.
-    max_ocr_image_size: int = 104_857_600  # 100 MB compressed
+    max_ocr_image_size: int = DEFAULT_MAX_UPLOAD_BYTES  # 100 MB compressed
     max_ocr_image_pixels: int = 150_000_000  # 150 MP decoded
     allowed_mime_types: str = "image/png,image/jpeg,image/tiff,image/webp"
 
