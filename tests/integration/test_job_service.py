@@ -180,7 +180,7 @@ class TestJobService:
         assert ("receive_file", "skipped") in steps
         db.close()
 
-    def test_default_copies_input_image(
+    def test_default_saves_jpeg_preview(
         self, tmp_storage: Path, fixtures_dir: Path, tmp_path: Path
     ) -> None:
         from PIL import Image
@@ -208,9 +208,11 @@ class TestJobService:
         )
 
         assert result.status == JobStatus.SUCCEEDED
+        # The job folder keeps a JPEG preview, not the original PNG.
         copied = store.get_input_image_path(result.job_id)
         assert copied is not None
-        assert copied.read_bytes() == img.read_bytes()
+        assert copied.name == "input.jpg"
+        assert not (tmp_storage / "jobs" / result.job_id / "input.png").exists()
         db.close()
 
     def test_canonical_json_on_disk_is_valid(self, tmp_storage: Path, fixtures_dir: Path) -> None:

@@ -97,14 +97,68 @@ class TestFileStore:
         assert store.delete_provider("paddle")
         assert store.load_provider("paddle") is None
 
-    def test_save_input_image(self, tmp_storage: Path, tmp_path: Path) -> None:
+    def test_save_input_image_converts_to_jpeg_preview(
+        self, tmp_storage: Path, tmp_path: Path
+    ) -> None:
+        from PIL import Image
+
         store = FileStore(tmp_storage)
         img = tmp_path / "test.png"
-        img.write_bytes(b"\x89PNG\r\n\x1a\n")
+        Image.new("RGB", (10, 10), "white").save(img)
         result = store.save_input_image("job_001", img)
+        assert result.name == "input.jpg"
         assert result.exists()
-        assert result.name == "input.png"
+        # The original format is not duplicated into the job directory.
+        assert not (tmp_storage / "jobs" / "job_001" / "input.png").exists()
         assert store.get_input_image_path("job_001") == result
+
+    def test_save_input_image_tif_becomes_renderable_preview(
+        self, tmp_storage: Path, tmp_path: Path
+    ) -> None:
+        from PIL import Image
+
+        store = FileStore(tmp_storage)
+        img = tmp_path / "scan.tif"
+        Image.new("L", (10, 10), "white").save(img)
+        result = store.save_input_image("job_002", img)
+        assert result.name == "input.jpg"
+        assert store.get_input_image_path("job_002") == result
+        job_dir = tmp_storage / "jobs" / "job_002"
+        # The browser cannot render TIFF; the job folder keeps no input.tif.
+        assert [f.name for f in job_dir.iterdir()] == ["input.jpg"]
+
+    def test_save_input_image_jpeg_copied_verbatim(
+        self, tmp_storage: Path, tmp_path: Path
+    ) -> None:
+        from PIL import Image
+
+        store = FileStore(tmp_storage)
+        img = tmp_path / "photo.jpeg"
+        Image.new("RGB", (10, 10), "white").save(img, format="JPEG")
+        result = store.save_input_image("job_003", img)
+        assert result.name == "input.jpg"
+        assert result.read_bytes() == img.read_bytes()
+
+    def test_get_input_image_path_prefers_renderable(
+        self, tmp_storage: Path
+    ) -> None:
+        store = FileStore(tmp_storage)
+        job_dir = tmp_storage / "jobs" / "job_legacy"
+        job_dir.mkdir(parents=True)
+        (job_dir / "input.tif").write_bytes(b"tiff")
+        (job_dir / "input.png").write_bytes(b"png")
+        # A renderable leftover from an old job wins over the TIFF.
+        assert store.get_input_image_path("job_legacy").suffix == ".png"
+
+    def test_get_input_image_path_falls_back_to_tif(
+        self, tmp_storage: Path
+    ) -> None:
+        store = FileStore(tmp_storage)
+        job_dir = tmp_storage / "jobs" / "job_tif_only"
+        job_dir.mkdir(parents=True)
+        (job_dir / "input.tif").write_bytes(b"tiff")
+        # Last resort: serve the non-renderable original rather than nothing.
+        assert store.get_input_image_path("job_tif_only").suffix == ".tif"
 
 
 class TestZstdCompression:

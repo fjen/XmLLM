@@ -58,10 +58,14 @@ class TestJobImage:
     """GET /jobs/{id}/image — serves the persisted input image."""
 
     def test_200_with_correct_content_type(self, client: TestClient, completed_job: str) -> None:
+        from PIL import Image
+
         r = client.get(f"/jobs/{completed_job}/image")
         assert r.status_code == 200
-        assert r.headers["content-type"] == "image/png"
-        assert r.content == _png_bytes()
+        # The upload lands as a JPEG preview, regardless of source format.
+        assert r.headers["content-type"] == "image/jpeg"
+        with Image.open(io.BytesIO(r.content)) as img:
+            assert img.format == "JPEG"
 
     def test_404_for_unknown_job(self, client: TestClient) -> None:
         r = client.get("/jobs/nonexistent/image")

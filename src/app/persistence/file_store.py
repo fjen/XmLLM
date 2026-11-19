@@ -4,7 +4,7 @@ Storage layout:
     {STORAGE_ROOT}/
       jobs/
         {job_id}/
-          input.{ext}        — original uploaded image (UI jobs only)
+          input.jpg          — browser-renderable JPEG preview (UI jobs only)
           raw_payload.json.zst
           canonical.json.zst
           alto.xml           — ALTO XML export (uncompressed)
@@ -20,6 +20,7 @@ roots keep working without migration.
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,12 @@ from typing import Any
 import zstandard
 
 _ZSTD_COMPRESSOR = zstandard.ZstdCompressor(level=3)
+
+_logger = logging.getLogger(__name__)
+
+# Formats a browser can draw in an <img> element. TIFF is accepted as
+# input but cannot be rendered, so it never reaches the job folder as-is.
+_RENDERABLE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".bmp"})
 
 
 def _write_zst(dest: Path, data: bytes) -> None:
@@ -70,9 +77,37 @@ class FileStore:
     # -- Save artifacts -------------------------------------------------------
 
     def save_input_image(self, job_id: str, source_path: Path) -> Path:
-        """Copy the input image into the job directory."""
-        dest = self.job_dir(job_id) / f"input{source_path.suffix}"
-        shutil.copy2(source_path, dest)
+        """Save a browser-renderable JPEG preview of the input image.
+
+        The job directory keeps only the preview. Pipeline steps read the
+        source file directly, and no export embeds the image, so the
+        original is not duplicated into storage. A source that is already
+        JPEG is copied verbatim. On conversion failure the original is
+        copied as a fallback so the viewer route can still try to serve it.
+        """
+        job_dir = self.job_dir(job_id)
+        dest = job_dir / "input.jpg"
+        if source_path.suffix.lower() in {".jpg", ".jpeg"}:
+            # copyfile, not copy2: the source may come from mkstemp (0600)
+            # and the job folder should carry default permissions.
+            shutil.copyfile(source_path, dest)
+            return dest
+        try:
+            from PIL import Image
+
+            with Image.open(source_path) as img:
+                if img.mode not in ("RGB", "L"):
+                    img = img.convert("RGB")
+                img.save(dest, format="JPEG", quality=85)
+        except Exception:
+            _logger.warning(
+                "JPEG preview failed for %s (%s); copying the original",
+                source_path.name, job_id, exc_info=True,
+            )
+            dest.unlink(missing_ok=True)
+            fallback = job_dir / f"input{source_path.suffix}"
+            shutil.copyfile(source_path, fallback)
+            return fallback
         return dest
 
     def save_json(self, job_id: str, filename: str, data: Any) -> Path:
@@ -158,16 +193,26 @@ class FileStore:
     # -- Input image ----------------------------------------------------------
 
     def get_input_image_path(self, job_id: str) -> Path | None:
-        """Find the input image for a job (any extension)."""
+        """Find the input image for a job, preferring renderable formats.
+
+        Jobs written before the JPEG-preview change may still carry the
+        original upload (`input.png`, `input.tif`, ...). Renderable files
+        win; a non-renderable leftover is a last resort.
+        """
         from src.app.ocr import SUPPORTED_IMAGE_EXTENSIONS
 
         d = self._jobs_dir / self._sanitize_id(job_id)
         if not d.exists():
             return None
-        for f in d.iterdir():
-            if f.stem == "input" and f.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS:
+        fallback: Path | None = None
+        for f in sorted(d.iterdir()):
+            if f.stem != "input" or f.suffix.lower() not in SUPPORTED_IMAGE_EXTENSIONS:
+                continue
+            if f.suffix.lower() in _RENDERABLE_SUFFIXES:
                 return f
-        return None
+            if fallback is None:
+                fallback = f
+        return fallback
 
     # -- Provider profiles ----------------------------------------------------
 

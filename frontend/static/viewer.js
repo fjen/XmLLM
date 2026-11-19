@@ -148,7 +148,7 @@
     img.src = '/jobs/' + encodeURIComponent(V.jobId) + '/image';
     img.onerror = () => {
       const note = el('div', 'viewer-nodata',
-        'Input image not available (it is not persisted for this job).');
+        'Input image not available (missing, or in a format the browser cannot display).');
       page.replaceChildren(note);
     };
     page.appendChild(img);
