@@ -145,7 +145,7 @@ class TestRemoteDispatch:
         _use_service(monkeypatch, url)
 
         with pytest.raises(
-            ocr_module.OcrPayloadTooLarge, match="too large"
+            ocr_module.OcrPayloadTooLargeError, match="too large"
         ):
             run_paddle_ocr(image_file, "fr")
 

@@ -401,10 +401,10 @@ class TestOcr:
     def test_service_rejection_returns_413(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from src.app.ocr import OcrPayloadTooLarge
+        from src.app.ocr import OcrPayloadTooLargeError
 
         def too_large(image_path: Path, lang: str) -> list:
-            raise OcrPayloadTooLarge(
+            raise OcrPayloadTooLargeError(
                 "OCR service rejected the upload as too large"
             )
 

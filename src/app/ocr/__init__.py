@@ -12,7 +12,7 @@ from src.app.settings import get_settings
 logger = logging.getLogger(__name__)
 
 
-class OcrPayloadTooLarge(RuntimeError):
+class OcrPayloadTooLargeError(RuntimeError):
     """The remote OCR service rejected the upload as too large.
 
     Subclasses RuntimeError so existing engine-error handlers keep
@@ -230,7 +230,7 @@ def _run_remote_ocr(image_path: Path, lang: str, service_url: str) -> list[Any]:
     if response.status_code == 413:
         # The request passed our own gate but the service's limit is
         # lower: surface it as 413 instead of an opaque server error.
-        raise OcrPayloadTooLarge(
+        raise OcrPayloadTooLargeError(
             f"OCR service rejected the upload as too large "
             f"({response.text[:200] or 'limit reached'})"
         )
