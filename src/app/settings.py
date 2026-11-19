@@ -53,7 +53,7 @@ class Settings(BaseSettings):
 
     # POST /ocr limits. Defaults sized for archival scanning: 800 DPI A3
     # decodes to ~124 MP, so the pixel cap sits above that with margin.
-    max_ocr_image_size: int = 20_971_520  # 20 MB compressed
+    max_ocr_image_size: int = 52_428_800  # 50 MB compressed
     max_ocr_image_pixels: int = 150_000_000  # 150 MP decoded
     allowed_mime_types: str = "image/png,image/jpeg,image/tiff,image/webp"
 
