@@ -88,6 +88,24 @@
   color: var(--select-text);
 }
 
+.viewer-toolbar .group .viewer-conf-label {
+  padding: 0 3px;
+  color: var(--disabled);
+}
+
+.viewer-toolbar .group .viewer-conf-input {
+  width: 52px;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  background: var(--window-bg);
+  color: var(--text);
+  font-size: 10px;
+}
+
+.viewer-toolbar .group .viewer-conf-input:focus {
+  outline: 1px solid var(--accent);
+}
+
 .viewer-chip {
   display: inline-flex;
   align-items: center;

@@ -52,9 +52,23 @@
     zoom: 1,             // 1 = the whole page fits its pane
     levels: {},          // level key -> shown
     hidden: new Set(),   // labels switched off with the chips
+    confMin: null,       // confidence range filter (null = unbounded)
+    confMax: null,
     spy: null,           // IntersectionObserver for .inview
     root: null,          // current .xmllm-viewer element (fullscreen target)
   };
+
+  // Confidence range filter: hides overlays whose engine confidence falls
+  // outside [confMin, confMax]. Overlays without a confidence are hidden
+  // while a range is active — the filter answers "what did the engine
+  // think", and a null confidence has no answer.
+  function passesConfidence(item) {
+    if (V.confMin == null && V.confMax == null) return true;
+    if (item.confidence == null) return false;
+    if (V.confMin != null && item.confidence < V.confMin) return false;
+    if (V.confMax != null && item.confidence > V.confMax) return false;
+    return true;
+  }
 
   function el(tag, cls, text) {
     const n = document.createElement(tag);
@@ -72,6 +86,8 @@
     V.zoom = 1;
     V.hidden = new Set();
     V.levels = { block: true, line: true, word: false, non_text: true };
+    V.confMin = null;
+    V.confMax = null;
 
     const area = document.getElementById('viewer-area');
     if (!area) return;
@@ -267,6 +283,43 @@
       V.chipsEl = null;
     }
 
+    // Confidence range filter. Overlays whose engine confidence falls
+    // outside the range are hidden; empty inputs mean unbounded on that
+    // side. Counts in the level buttons and chips follow the filter.
+    const conf = el('span', 'group');
+    conf.title = 'Confidence range — hide overlays outside it. '
+      + 'Overlays without a confidence are hidden while a range is set.';
+    const applyConf = () => {
+      const read = (v) => {
+        const n = parseFloat(v);
+        return isNaN(n) ? null : Math.min(1, Math.max(0, n));
+      };
+      V.confMin = read(V.confMinInput.value);
+      V.confMax = read(V.confMaxInput.value);
+      refreshOverlays();
+    };
+    const confInput = (key, placeholder) => {
+      const inp = document.createElement('input');
+      inp.type = 'number';
+      inp.className = 'viewer-conf-input';
+      inp.dataset.conf = key;
+      inp.min = '0';
+      inp.max = '1';
+      inp.step = '0.05';
+      inp.placeholder = placeholder;
+      // 'input' fires on every keystroke and on programmatic fills;
+      // 'change' covers spinner clicks and blur commits.
+      inp.addEventListener('input', applyConf);
+      inp.addEventListener('change', applyConf);
+      return inp;
+    };
+    V.confMinInput = confInput('min', 'min');
+    V.confMaxInput = confInput('max', 'max');
+    conf.appendChild(el('span', 'viewer-conf-label', 'Conf'));
+    conf.appendChild(V.confMinInput);
+    conf.appendChild(V.confMaxInput);
+    bar.appendChild(conf);
+
     // Export-status badges (ALTO / PAGE / viewer render).
     const es = data.export_status || {};
     const badges = el('span', 'group');
@@ -327,15 +380,30 @@
     if (!V.data || !V.root || !V.page) return;
     const overlays = collectOverlays(V.data);
 
-    // Level toggle pressed states.
+    // Counts follow the confidence filter (level toggles and label chips
+    // are separate filters; with no range set the counts are document-wide).
+    const confFiltered = overlays.filter(o => passesConfidence(o.item));
     LEVELS.forEach(lv => {
       const b = V.levelButtons && V.levelButtons[lv.key];
-      if (b) b.setAttribute('aria-pressed', String(!!V.levels[lv.key]));
+      if (b) {
+        b.textContent = lv.title + ' '
+          + confFiltered.filter(o => o.level === lv.key).length;
+        b.setAttribute('aria-pressed', String(!!V.levels[lv.key]));
+      }
     });
 
-    // Chips: counts are static per document; only pressed state changes.
+    // Chips: counts follow the confidence filter; only pressed state and
+    // count change (chips stay visible even at zero).
     if (V.chipsEl) {
+      const counts = {};
+      confFiltered.forEach(o => {
+        if (o.level === 'line' || o.level === 'word') return;
+        const label = o.item.label || o.level;
+        counts[label] = (counts[label] || 0) + 1;
+      });
       V.chipsEl.querySelectorAll('.viewer-chip').forEach(chip => {
+        const b = chip.querySelector('b');
+        if (b) b.textContent = String(counts[chip.dataset.label] || 0);
         chip.setAttribute('aria-pressed', String(!V.hidden.has(chip.dataset.label)));
       });
     }
@@ -364,7 +432,8 @@
     if (V.selectedId && !V.details.classList.contains('hidden')) {
       const stillShown = overlays.some(o =>
         o.item.id === V.selectedId && V.levels[o.level]
-        && !V.hidden.has(o.item.label || o.level));
+        && !V.hidden.has(o.item.label || o.level)
+        && passesConfidence(o.item));
       if (!stillShown) {
         V.details.classList.add('hidden');
       }
@@ -378,6 +447,7 @@
       if (!V.levels[level]) return;
       const label = item.label || level;
       if (V.hidden.has(label)) return;
+      if (!passesConfidence(item)) return;
       shown++;
 
       const c = colorOf(label, level);
@@ -427,7 +497,8 @@
 
     if (!shown) {
       cards.appendChild(el('div', 'viewer-empty',
-        'Nothing shown — enable a level above or re-enable a label chip.'));
+        'Nothing shown — enable a level above, re-enable a label chip,'
+        + ' or widen the confidence range.'));
     }
   }
 
