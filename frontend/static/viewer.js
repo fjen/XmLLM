@@ -230,6 +230,19 @@
     }
   }
 
+  // Count overlays per semantic label. Line and word overlays carry OCR text
+  // as their label, so they stay level-toggled. A fallback label equals its
+  // level name; skip it too, or the chip would duplicate the level button.
+  function countLabels(overlays) {
+    const counts = {};
+    overlays.forEach(o => {
+      if (o.level === 'line' || o.level === 'word') return;
+      if (!o.item.label || o.item.label === o.level) return;
+      counts[o.item.label] = (counts[o.item.label] || 0) + 1;
+    });
+    return counts;
+  }
+
   function renderToolbar(overlays) {
     const bar = el('div', 'viewer-toolbar');
     const data = V.data;
@@ -247,21 +260,10 @@
     });
     bar.appendChild(levels);
 
-    // One chip per *semantic* label, with its count; click to hide or show
-    // it (ported renderFilters). Line/word overlays are labelled with their
-    // OCR text — chips for those would explode the toolbar and hiding by
-    // text occurrence would be meaningless — so they are level-toggled only.
-    // Fallback labels (a block whose role is unset falls back to the level
-    // name) are skipped too: their chip would duplicate the level button.
-    // Counts are static per document: chips stay visible even while their
-    // level toggle is off (refreshOverlays keeps their pressed state true).
-    const counts = {};
-    overlays.forEach(o => {
-      if (o.level === 'line' || o.level === 'word') return;
-      if (!o.item.label || o.item.label === o.level) return;
-      const label = o.item.label;
-      counts[label] = (counts[label] || 0) + 1;
-    });
+    // One chip per semantic label, with its count; click to hide or show
+    // it (ported renderFilters). Counts are static per document: chips stay
+    // visible even while their level toggle is off.
+    const counts = countLabels(overlays);
     const labels = Object.keys(counts);
     if (labels.length) {
       const chips = el('span', 'group');
@@ -398,13 +400,7 @@
     // Chips: counts follow the confidence filter; only pressed state and
     // count change (chips stay visible even at zero).
     if (V.chipsEl) {
-      const counts = {};
-      confFiltered.forEach(o => {
-        if (o.level === 'line' || o.level === 'word') return;
-        if (!o.item.label || o.item.label === o.level) return;
-        const label = o.item.label;
-        counts[label] = (counts[label] || 0) + 1;
-      });
+      const counts = countLabels(confFiltered);
       V.chipsEl.querySelectorAll('.viewer-chip').forEach(chip => {
         const b = chip.querySelector('b');
         if (b) b.textContent = String(counts[chip.dataset.label] || 0);
