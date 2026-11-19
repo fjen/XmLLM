@@ -92,22 +92,30 @@ class FileStore:
             # and the job folder should carry default permissions.
             shutil.copyfile(source_path, dest)
             return dest
-        try:
-            from PIL import Image
 
-            with Image.open(source_path) as img:
-                if img.mode not in ("RGB", "L"):
-                    img = img.convert("RGB")
-                img.save(dest, format="JPEG", quality=85)
-        except Exception:
+        from PIL import Image, UnidentifiedImageError
+
+        try:
+            img = Image.open(source_path)
+            img.load()
+        except (UnidentifiedImageError, ValueError, OSError):
+            # The source cannot be decoded. Keep the original for the
+            # viewer route. Write errors below this point must propagate.
             _logger.warning(
                 "JPEG preview failed for %s (%s); copying the original",
                 source_path.name, job_id, exc_info=True,
             )
-            dest.unlink(missing_ok=True)
             fallback = job_dir / f"input{source_path.suffix}"
             shutil.copyfile(source_path, fallback)
             return fallback
+
+        try:
+            preview = img
+            if img.mode not in ("RGB", "L"):
+                preview = img.convert("RGB")
+            preview.save(dest, format="JPEG", quality=85)
+        finally:
+            img.close()
         return dest
 
     def save_json(self, job_id: str, filename: str, data: Any) -> Path:

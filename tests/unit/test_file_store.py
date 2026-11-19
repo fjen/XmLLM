@@ -171,6 +171,19 @@ class TestFileStore:
         # Last resort: serve the non-renderable original rather than nothing.
         assert store.get_input_image_path("job_tif_only").suffix == ".tif"
 
+    def test_unreadable_source_copies_the_original(
+        self, tmp_storage: Path, tmp_path: Path
+    ) -> None:
+        store = FileStore(tmp_storage)
+        img = tmp_path / "broken.png"
+        img.write_bytes(b"not an image")
+
+        result = store.save_input_image("job_broken", img)
+
+        assert result.name == "input.png"
+        assert result.read_bytes() == b"not an image"
+        assert not (tmp_storage / "jobs" / "job_broken" / "input.jpg").exists()
+
 
 class TestZstdCompression:
     def test_save_json_writes_compressed_zst(self, tmp_storage: Path) -> None:
