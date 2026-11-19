@@ -251,12 +251,15 @@
     // it (ported renderFilters). Line/word overlays are labelled with their
     // OCR text — chips for those would explode the toolbar and hiding by
     // text occurrence would be meaningless — so they are level-toggled only.
+    // Fallback labels (a block whose role is unset falls back to the level
+    // name) are skipped too: their chip would duplicate the level button.
     // Counts are static per document: chips stay visible even while their
     // level toggle is off (refreshOverlays keeps their pressed state true).
     const counts = {};
     overlays.forEach(o => {
       if (o.level === 'line' || o.level === 'word') return;
-      const label = o.item.label || o.level;
+      if (!o.item.label || o.item.label === o.level) return;
+      const label = o.item.label;
       counts[label] = (counts[label] || 0) + 1;
     });
     const labels = Object.keys(counts);
@@ -398,7 +401,8 @@
       const counts = {};
       confFiltered.forEach(o => {
         if (o.level === 'line' || o.level === 'word') return;
-        const label = o.item.label || o.level;
+        if (!o.item.label || o.item.label === o.level) return;
+        const label = o.item.label;
         counts[label] = (counts[label] || 0) + 1;
       });
       V.chipsEl.querySelectorAll('.viewer-chip').forEach(chip => {

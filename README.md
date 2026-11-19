@@ -59,7 +59,7 @@ python scripts/batch_alto.py /path/to/book --lang de --out /path/to/alto
 
 - `--lang` is a PaddleOCR language code (`de`, `fr`, `en`, `ch`, `japan`, ...). The batch maps it to ISO 639-3 and stamps it into the canonical nodes, so ALTO carries `LANG` attributes.
 - The batch skips images whose ALTO output already exists. Without `--out`, an image counts as done when a prior job for the same filename produced ALTO. Files with the same name in different directories count as the same image. Use `--no-skip-existing` to reprocess.
-- `--out` copies each `alto.xml` as `<image-stem>.xml`. `--storage-root` overrides `STORAGE_ROOT`.
+- `--out` writes plain (decompressed) ALTO XML as `<image-stem>.xml`. `--storage-root` overrides `STORAGE_ROOT`.
 - Batch jobs keep the source image in place. The web UI shows no page image for them.
 - Exit code 0 only if every image produced ALTO.
 

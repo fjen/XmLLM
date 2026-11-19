@@ -7,8 +7,8 @@ Storage layout:
           input.jpg          — browser-renderable JPEG preview (UI jobs only)
           raw_payload.json.zst
           canonical.json.zst
-          alto.xml           — ALTO XML export (uncompressed)
-          page.xml           — PAGE XML export (uncompressed)
+          alto.xml.zst       — ALTO XML export (zstd; served decompressed)
+          page.xml.zst       — PAGE XML export (zstd; served decompressed)
           viewer.json.zst
           events.json.zst
 
@@ -118,12 +118,6 @@ class FileStore:
         )
         return dest
 
-    def save_bytes(self, job_id: str, filename: str, data: bytes) -> Path:
-        """Save raw bytes (e.g. XML)."""
-        dest = self.job_dir(job_id) / self._sanitize_id(filename)
-        dest.write_bytes(data)
-        return dest
-
     def save_raw_payload(self, job_id: str, data: dict) -> Path:
         return self.save_json(job_id, "raw_payload.json", data)
 
@@ -131,10 +125,14 @@ class FileStore:
         return self.save_json(job_id, "canonical.json", data)
 
     def save_alto(self, job_id: str, xml_bytes: bytes) -> Path:
-        return self.save_bytes(job_id, "alto.xml", xml_bytes)
+        dest = self.job_dir(job_id) / "alto.xml.zst"
+        _write_zst(dest, xml_bytes)
+        return dest
 
     def save_page_xml(self, job_id: str, xml_bytes: bytes) -> Path:
-        return self.save_bytes(job_id, "page.xml", xml_bytes)
+        dest = self.job_dir(job_id) / "page.xml.zst"
+        _write_zst(dest, xml_bytes)
+        return dest
 
     def save_viewer(self, job_id: str, data: dict) -> Path:
         return self.save_json(job_id, "viewer.json", data)
@@ -145,8 +143,8 @@ class FileStore:
     # -- Load artifacts -------------------------------------------------------
 
     def _resolve_artifact(self, job_id: str, filename: str) -> Path | None:
-        """Single source of the dual-name rule: `.json.zst` first, then the
-        legacy uncompressed `.json`. Used by every reader/checker."""
+        """Single source of the dual-name rule: `<name>.zst` first, then
+        the legacy uncompressed `<name>`. Used by every reader/checker."""
         d = self._jobs_dir / self._sanitize_id(job_id)
         zst = d / self._sanitize_id(f"{filename}.zst")
         if zst.exists():
@@ -165,11 +163,13 @@ class FileStore:
             return json.loads(_read_zst(path))
         return json.loads(path.read_text(encoding="utf-8"))
 
-    def load_bytes(self, job_id: str, filename: str) -> bytes | None:
-        """Load raw bytes. Returns None if not found."""
-        path = self._jobs_dir / self._sanitize_id(job_id) / self._sanitize_id(filename)
-        if not path.exists():
+    def load_xml(self, job_id: str, filename: str) -> bytes | None:
+        """Load an XML artifact (.xml.zst, or legacy uncompressed .xml)."""
+        path = self._resolve_artifact(job_id, filename)
+        if path is None:
             return None
+        if path.name.endswith(".zst"):
+            return _read_zst(path)
         return path.read_bytes()
 
     def load_raw_payload(self, job_id: str) -> dict | None:
@@ -179,10 +179,10 @@ class FileStore:
         return self.load_json(job_id, "canonical.json")
 
     def load_alto(self, job_id: str) -> bytes | None:
-        return self.load_bytes(job_id, "alto.xml")
+        return self.load_xml(job_id, "alto.xml")
 
     def load_page_xml(self, job_id: str) -> bytes | None:
-        return self.load_bytes(job_id, "page.xml")
+        return self.load_xml(job_id, "page.xml")
 
     def load_viewer(self, job_id: str) -> dict | None:
         return self.load_json(job_id, "viewer.json")

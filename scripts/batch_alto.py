@@ -6,8 +6,8 @@ Runs the full XmLLM pipeline in-process, no server:
     RawProviderPayload → canonical → enrichers → validation → ALTO XML
 
 Each image becomes one job persisted under STORAGE_ROOT/jobs/<job_id>/
-(alto.xml, canonical.json.zst, events.json.zst, ...) — the same artifacts
-the HTTP API would produce, so the audit trail stays intact.
+(alto.xml.zst, canonical.json.zst, events.json.zst, ...) — the same
+artifacts the HTTP API would produce, so the audit trail stays intact.
 
 Usage:
     python scripts/batch_alto.py /path/to/book1 /path/to/book2
@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import shutil
 import sys
 import traceback
 from pathlib import Path
@@ -53,7 +52,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--out",
         type=Path,
         default=None,
-        help="Optional directory to copy each alto.xml into, named <image-stem>.xml.",
+        help="Optional directory to write each job's ALTO XML into, named"
+             " <image-stem>.xml (plain, decompressed).",
     )
     parser.add_argument(
         "--no-skip-existing",
@@ -90,8 +90,8 @@ def collect_images(directories: list[Path]) -> list[Path]:
 
 def process_image(
     tif: Path, svc: JobService, store: FileStore, lang: str
-) -> tuple[str, Path | None]:
-    """Run one image through the pipeline. Returns (status, alto_path)."""
+) -> tuple[str, bytes | None]:
+    """Run one image through the pipeline. Returns (status, alto_bytes)."""
     from PIL import Image as PILImage
     from src.app.domain.models import RawProviderPayload
     from src.app.ocr import (
@@ -135,7 +135,9 @@ def process_image(
 
     if not result.has_alto:
         return str(result.status), None
-    return str(result.status), store.job_dir(result.job_id) / "alto.xml"
+    # Plain, decompressed bytes: --out copies are for external consumers
+    # (Kitodo & co), which get XML, never the job folder's zstd wrapper.
+    return str(result.status), store.load_alto(result.job_id)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -210,7 +212,7 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"SKIP    {tif.name} (ALTO already exists)")
                     continue
             try:
-                status, alto_path = process_image(tif, svc, store, args.lang)
+                status, alto_bytes = process_image(tif, svc, store, args.lang)
             except Exception as exc:  # keep batch going on per-file errors
                 failures.append((tif.name, f"{type(exc).__name__}: {exc}"))
                 print(f"FAILED  {tif.name}: {type(exc).__name__}: {exc}", file=sys.stderr)
@@ -219,19 +221,19 @@ def main(argv: list[str] | None = None) -> int:
                 # are not reproducible per-file
                 continue
 
-            if alto_path is None:
+            if alto_bytes is None:
                 failures.append((tif.name, f"no ALTO produced (status {status})"))
                 print(f"FAILED  {tif.name}: no ALTO produced (status {status})")
                 continue
 
-            print(f"OK      {tif.name} -> {alto_path} (status {status})")
+            print(f"OK      {tif.name} (status {status})")
             if args.out is not None:
                 dest = args.out / dest_names[tif]
-                # Atomic copy: a Ctrl-C / OOM / disk-full mid-copy must never
-                # leave a truncated <stem>.xml — skip-existing would then
-                # silently skip it on every rerun.
+                # Atomic write: a Ctrl-C / OOM / disk-full mid-write must
+                # never leave a truncated <stem>.xml — skip-existing would
+                # then silently skip it on every rerun.
                 part = dest.with_name(dest.name + ".part")
-                shutil.copy2(alto_path, part)
+                part.write_bytes(alto_bytes)
                 os.replace(part, dest)
                 print(f"        copied to {dest}")
     finally:

@@ -7,7 +7,7 @@ job persistence) runs for real.
 
 from __future__ import annotations
 
-import shutil
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -113,6 +113,11 @@ class TestBatchEndToEnd:
         assert root.tag == "{http://www.loc.gov/standards/alto/ns-v4#}alto"
         strings = root.findall(".//{*}String")
         assert [s.get("CONTENT") for s in strings] == ["Bonjour", "monde"]
+        # The --out copy is the plain decompressed bytes of the stored XML.
+        from src.app.persistence.file_store import FileStore
+
+        job_id = next((tmp_path / "storage" / "jobs").iterdir()).name
+        assert alto_path.read_bytes() == FileStore(tmp_path / "storage").load_alto(job_id)
 
     def test_jpeg_becomes_job_with_alto(
         self,
@@ -153,7 +158,13 @@ class TestBatchEndToEnd:
         assert rc == 0
         job_dirs = list((tmp_path / "storage" / "jobs").iterdir())
         assert len(job_dirs) == 1
-        root = etree.parse(str(job_dirs[0] / "alto.xml")).getroot()
+        from io import BytesIO
+
+        from src.app.persistence.file_store import FileStore
+
+        alto_bytes = FileStore(tmp_path / "storage").load_alto(job_dirs[0].name)
+        assert alto_bytes is not None
+        root = etree.parse(BytesIO(alto_bytes)).getroot()
         for s in root.findall(".//{*}String"):
             assert s.get("LANG") == "fra"
 
@@ -330,22 +341,27 @@ class TestSkipExisting:
             """Like KeyboardInterrupt (escapes `except Exception`) without
             tripping pytest's own session-interrupt handling."""
 
-        real_copy2 = shutil.copy2  # same module object; capture before patch
+        # os is shared with the module under test: capture the real
+        # replace BEFORE patching, or the "restore" would restore the
+        # crashing patch itself.
+        real_replace = os.replace
 
-        def crashing_copy2(src: Path, dst: Path) -> None:
-            Path(dst).write_text("<alto>truncat", encoding="utf-8")
-            raise _SimulatedInterrupt  # simulated Ctrl-C mid-copy
+        def crashing_replace(src: Path, dst: Path) -> None:
+            # Simulate disk-full: temp file truncated, crash before the rename.
+            Path(src).write_text("<alto>truncat", encoding="utf-8")
+            raise _SimulatedInterrupt
 
-        monkeypatch.setattr(batch_alto.shutil, "copy2", crashing_copy2)
+        monkeypatch.setattr(batch_alto.os, "replace", crashing_replace)
         with pytest.raises(_SimulatedInterrupt):
             batch_alto.main(argv)
 
-        # The dest was never completed; only the .part marker exists.
+        # The dest was never completed; the .part marker exists.
         assert not (out / "page1.xml").exists()
+        assert (out / "page1.xml.part").exists()
 
-        # Rerun with the real copy: the partial state does not poison
-        # skip-existing — the image is processed and copied again.
-        monkeypatch.setattr(batch_alto.shutil, "copy2", real_copy2)
+        # Rerun with the real replace: the partial state does not poison
+        # skip-existing — the image is processed and written again.
+        monkeypatch.setattr(batch_alto.os, "replace", real_replace)
         assert batch_alto.main(argv) == 0
         assert len(stub_ocr) == 2  # reprocessed
         assert (out / "page1.xml").exists()
@@ -370,7 +386,7 @@ class TestNoImageCopy:
         job_dir = next((tmp_path / "storage" / "jobs").iterdir())
         artifacts = {p.name for p in job_dir.iterdir()}
         assert artifacts == {
-            "raw_payload.json.zst", "canonical.json.zst", "alto.xml",
-            "page.xml", "viewer.json.zst", "events.json.zst",
+            "raw_payload.json.zst", "canonical.json.zst", "alto.xml.zst",
+            "page.xml.zst", "viewer.json.zst", "events.json.zst",
         }
         assert not any(p.stem == "input" for p in job_dir.iterdir())

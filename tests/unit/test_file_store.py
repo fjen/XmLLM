@@ -25,17 +25,10 @@ class TestFileStore:
         loaded = store.load_json("job_001", "test.json")
         assert loaded == data
 
-    def test_save_and_load_bytes(self, tmp_storage: Path) -> None:
-        store = FileStore(tmp_storage)
-        data = b"<alto>test</alto>"
-        store.save_bytes("job_001", "alto.xml", data)
-        loaded = store.load_bytes("job_001", "alto.xml")
-        assert loaded == data
-
     def test_load_nonexistent_returns_none(self, tmp_storage: Path) -> None:
         store = FileStore(tmp_storage)
         assert store.load_json("missing", "test.json") is None
-        assert store.load_bytes("missing", "test.xml") is None
+        assert store.load_xml("missing", "test.xml") is None
 
     def test_save_raw_payload(self, tmp_storage: Path) -> None:
         store = FileStore(tmp_storage)
@@ -60,6 +53,24 @@ class TestFileStore:
         xml = b"<?xml version='1.0'?><PcGts/>"
         store.save_page_xml("job_001", xml)
         assert store.load_page_xml("job_001") == xml
+
+    def test_load_legacy_plain_xml(self, tmp_storage: Path) -> None:
+        store = FileStore(tmp_storage)
+        d = tmp_storage / "jobs" / "job_001"
+        d.mkdir(parents=True)
+        (d / "alto.xml").write_bytes(b"<alto>legacy</alto>")
+
+        assert store.load_alto("job_001") == b"<alto>legacy</alto>"
+        assert store.job_has_artifact("job_001", "alto.xml")
+
+    def test_xml_zst_preferred_over_legacy(self, tmp_storage: Path) -> None:
+        store = FileStore(tmp_storage)
+        d = tmp_storage / "jobs" / "job_001"
+        d.mkdir(parents=True)
+        (d / "alto.xml").write_bytes(b"<alto>legacy</alto>")
+        store.save_alto("job_001", b"<alto>zstd</alto>")
+
+        assert store.load_alto("job_001") == b"<alto>zstd</alto>"
 
     def test_save_events(self, tmp_storage: Path) -> None:
         store = FileStore(tmp_storage)
